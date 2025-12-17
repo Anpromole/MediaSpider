@@ -1,5 +1,19 @@
 import sys
 import os
+# 确保PATH环境变量存在，若不存在则从系统中获取（适用于Windows）
+if "PATH" not in os.environ:
+    if sys.platform.startswith("win32"):
+        # 从系统中读取PATH（需要pywin32库，若没有需安装）
+        try:
+            import win32api
+            os.environ["PATH"] = win32api.GetEnvironmentVariable("PATH")
+        except ImportError:
+            # 若没有pywin32，手动添加常见路径（根据实际情况调整）
+            os.environ["PATH"] = "C:\\Windows\\system32;C:\\Windows;%s" % os.environ.get("PATH", "")
+    else:
+        # 非Windows系统（如Linux/macOS）
+        os.environ["PATH"] = "/usr/local/bin:/usr/bin:/bin:%s" % os.environ.get("PATH", "")
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QLineEdit, QSpinBox, QDateEdit, QTextEdit,
