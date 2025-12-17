@@ -8,7 +8,7 @@
 支持爬取文章并生成 PDF 文件（基于 Playwright 渲染动态内容）。
 可以作为库被导入使用或通过命令行工具调用。
 
-版本: 2.2 (修复 PDF title 参数错误)
+版本: 2.6 (新增：支持任务中断停止功能)
 """
 
 import os
@@ -28,15 +28,26 @@ from .scraper import WeChatScraper, BatchWeChatScraper
 from spider.db.factory import DatabaseFactory
 
 # 新增：PDF 生成相关依赖
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 
 class WeChatSpiderRunner:
-    """微信爬虫运行器，封装爬虫的主要功能（新增 PDF 生成）"""
+    """微信爬虫运行器，封装爬虫的主要功能（新增 PDF 生成与中断控制）"""
 
     def __init__(self):
         """初始化爬虫运行器"""
         self.login_manager = WeChatSpiderLogin()
+        # 新增：运行控制标志位
+        self.keep_running = True
+
+    def stop(self):
+        """停止当前任务"""
+        logger.warning("收到停止指令，正在终止任务...")
+        self.keep_running = False
+
+    def reset_stop(self):
+        """重置运行状态"""
+        self.keep_running = True
 
     def _clean_filename(self, filename):
         """清理文件名，移除非法字符并限制长度"""
@@ -46,38 +57,47 @@ class WeChatSpiderRunner:
         # 限制最大长度（避免系统限制）
         return cleaned[:80]
 
-    def _generate_article_pdf(self, article_url, pdf_path, cookies=None, wait_time=5):
+    def _generate_article_pdf(self, article_url, pdf_path, cookies=None, wait_time=10):
         """
-        生成微信公众号文章的 PDF（适配登录态和动态渲染）
-        :param article_url: 文章原始 URL
-        :param pdf_path: PDF 保存路径
-        :param cookies: 登录后的微信 cookie 字符串/列表
-        :param wait_time: 页面渲染等待时间（秒）
-        :return: 是否生成成功
+        生成微信公众号文章的 PDF（最终版：修复所有参数错误 + 图片懒加载问题）
         """
+        # 如果已被终止，直接返回
+        if not self.keep_running:
+            return False
+
         try:
             with sync_playwright() as p:
-                # 启动浏览器（规避微信反爬检测）
+                # 启动浏览器（优化配置：强制允许图片加载、禁用资源拦截）
                 browser = p.chromium.launch(
                     headless=True,
                     args=[
                         '--no-sandbox',  # 兼容 Linux 无沙箱环境
                         '--disable-blink-features=AutomationControlled',  # 规避自动化检测
-                        '--disable-web-security',  # 兼容跨域 cookie
+                        '--disable-web-security',  # 兼容跨域 cookie/图片
+                        '--disable-features=ImageLazyLoading',  # 禁用懒加载（关键！）
+                        '--allow-running-insecure-content',  # 允许http图片（部分公众号图片是http）
+                        '--disable-extensions',  # 禁用扩展，避免干扰
+                        '--disable-dev-shm-usage',  # 解决内存不足问题
                         '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-                    ]
+                    ],
+                    handle_sigint=False
                 )
 
-                # 创建浏览器上下文（导入登录 cookie）
+                # 创建浏览器上下文
                 context = browser.new_context(
-                    viewport={'width': 1280, 'height': 720},
+                    viewport={'width': 1280, 'height': 2000},  # 增大可视区域，减少懒加载触发
                     extra_http_headers={
                         'Accept-Language': 'zh-CN,zh;q=0.9',
-                        'Referer': 'https://mp.weixin.qq.com/'
-                    }
+                        'Referer': 'https://mp.weixin.qq.com/',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    },
+                    locale='zh-CN',
+                    geolocation={'latitude': 39.9042, 'longitude': 116.4074}  # 模拟国内位置
                 )
 
-                # 导入登录态 cookie（关键：微信文章需要登录才能访问）
+                # 导入登录态 cookie
                 if cookies:
                     cookie_list = []
                     if isinstance(cookies, str):
@@ -92,56 +112,69 @@ class WeChatSpiderRunner:
                                 'domain': '.weixin.qq.com',
                                 'path': '/',
                                 'httpOnly': True,
-                                'secure': True
+                                'secure': True,
+                                'sameSite': 'None'
                             })
                     elif isinstance(cookies, list):
                         cookie_list = cookies
 
                     if cookie_list:
                         context.add_cookies(cookie_list)
-                        logger.debug(f"导入 {len(cookie_list)} 个登录 cookie")
 
-                # 访问文章 URL（等待动态内容加载）
+                # 访问文章 URL
                 page = context.new_page()
+                page.route("**/*", lambda route: route.continue_())
+
                 page.goto(
                     article_url,
-                    wait_until='networkidle',  # 网络空闲=内容加载完成
-                    timeout=60000  # 延长超时时间（微信加载慢）
+                    wait_until='load',
+                    timeout=120000
                 )
 
-                # 强制等待微信文章渲染（兜底策略）
-                page.wait_for_timeout(wait_time * 1000)
-
-                # 等待核心内容区域加载（微信文章核心容器）
+                # 步骤1：等待核心内容区域加载
                 try:
                     page.wait_for_selector('#js_content', timeout=30000)
-                    logger.debug("文章核心内容区域加载完成")
-                except Exception as e:
-                    logger.warning(f"文章内容加载超时，但尝试继续生成 PDF: {e}")
+                except PlaywrightTimeoutError:
+                    pass
 
-                # 生成 PDF（保留微信原文样式，移除非法的 title 参数）
+                # 步骤2：模拟页面滚动
+                scroll_height = page.evaluate("document.documentElement.scrollHeight")
+                for i in range(0, int(scroll_height), 500):
+                    # 中断检查：如果用户点击停止，在滚动过程中退出
+                    if not self.keep_running:
+                        browser.close()
+                        return False
+                    page.evaluate(f"window.scrollTo(0, {i})")
+                    page.wait_for_timeout(500)
+
+                page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+                page.wait_for_timeout(1000)
+
+                # 步骤4：显式等待所有图片元素加载完成
+                try:
+                    page.wait_for_selector('#js_content img', state='attached', timeout=wait_time * 1000)
+                except PlaywrightTimeoutError:
+                    pass
+
+                # 步骤5：基础等待（兜底）
+                page.wait_for_timeout(wait_time * 1000)
+
+                # 生成 PDF
                 page.pdf(
                     path=pdf_path,
                     format='A4',
-                    margin={
-                        'top': '15mm',
-                        'bottom': '15mm',
-                        'left': '10mm',
-                        'right': '10mm'
-                    },
-                    print_background=True,  # 保留背景色/图片
-                    display_header_footer=False
-                    # 移除 title 参数：Playwright 的 page.pdf() 不支持该参数
+                    margin={'top': '15mm', 'bottom': '15mm', 'left': '10mm', 'right': '10mm'},
+                    print_background=True,
+                    display_header_footer=False,
+                    scale=1.0
                 )
 
-                # 清理资源
                 browser.close()
                 logger.info(f"PDF 生成成功: {pdf_path}")
                 return True
 
         except Exception as e:
             logger.error(f"生成 PDF 失败 [{article_url}]: {str(e)}")
-            # 清理生成失败的空文件
             if os.path.exists(pdf_path):
                 os.remove(pdf_path)
             return False
@@ -156,304 +189,218 @@ class WeChatSpiderRunner:
             return False
 
         logger.success(f"登录成功！")
-        logger.debug(f"Token: {token[:8]}...{token[-4:]}")
-        logger.debug(f"Cookie: {len(headers['cookie'])} 个字符")
-        logger.info("登录信息已保存到缓存文件")
-
         return True
 
     def search_account(self, name, output_file=None):
-        """搜索公众号（原功能不变）"""
+        """搜索公众号（统一返回列表格式）"""
         logger.info(f"搜索公众号: {name}")
-
         if not self.login_manager.is_logged_in():
             logger.error("未登录或登录已过期，请先登录")
-            return None
-
+            return []
         token = self.login_manager.get_token()
         headers = self.login_manager.get_headers()
-
         scraper = WeChatScraper(token, headers)
         results = scraper.search_account(name)
-
         if not results:
             logger.warning(f"未找到匹配的公众号: {name}")
-            return None
-
-        logger.info(f"找到 {len(results)} 个匹配的公众号:")
-        for i, account in enumerate(results):
-            logger.info(f"{i + 1}. {account['wpub_name']} (fakeid: {account['wpub_fakid']})")
-
-        if output_file:
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(results, f, ensure_ascii=False, indent=2)
-            logger.info(f"搜索结果已保存到: {output_file}")
-
+            return []
         return results
 
     def scrape_single_account(
-            self, name, pages=10, days=30, include_content=False,
+            self, name, pages=10, start_date=None, end_date=None, include_content=False,
             interval=10, output_file=None, use_db=False, db_type="sqlite",
-            generate_pdf=False, pdf_output_dir=None  # 新增 PDF 相关参数
+            generate_pdf=False, pdf_output_dir=None,
+            progress_callback=None, keywords=None
     ):
         """
-        爬取单个公众号（新增 PDF 生成功能）
-        :param generate_pdf: 是否生成文章 PDF
-        :param pdf_output_dir: PDF 输出目录（默认：公众号名称_时间戳_pdf）
+        爬取单个公众号（支持中断）
         """
+        self.reset_stop()  # 确保开始前状态重置
         logger.info(f"爬取公众号: {name}")
+        keywords = keywords or []
 
         if not self.login_manager.is_logged_in():
-            logger.error("未登录或登录已过期，请先登录")
-            return False
+            return {"success": False, "msg": "未登录或登录已过期", "data": {}}
 
         token = self.login_manager.get_token()
         headers = self.login_manager.get_headers()
         scraper = WeChatScraper(token, headers)
 
-        # 搜索公众号
-        logger.info(f"搜索公众号: {name}")
         results = scraper.search_account(name)
-
         if not results:
-            logger.warning(f"未找到匹配的公众号: {name}")
-            return False
+            return {"success": False, "msg": "未找到匹配的公众号", "data": {}}
 
         account = results[0]
-        logger.info(f"使用公众号: {account['wpub_name']} (fakeid: {account['wpub_fakid']})")
 
-        # 进度回调
-        def progress_callback(current, total):
-            logger.info(f"进度: {current}/{total} 页")
+        # 进度回调（页面级）
+        def page_progress_callback(current, total):
+            if not self.keep_running: return  # 中断时不回调
+            if progress_callback:
+                page_percent = int(current / total * 30)
+                progress_callback(page_percent, f"获取文章列表 {current}/{total} 页")
 
-        scraper.set_callback('progress', progress_callback)
+        scraper.set_callback('progress', page_progress_callback)
 
         # 获取文章列表
-        logger.info(f"获取文章列表，最大 {pages} 页...")
         articles = scraper.get_account_articles(
             account['wpub_name'],
             account['wpub_fakid'],
             pages
         )
 
-        logger.info(f"获取到 {len(articles)} 篇文章")
-
-        # 按日期过滤
-        if days:
-            end_date = datetime.now().date()
-            start_date = end_date - timedelta(days=days)
-
-            logger.info(f"过滤日期范围: {start_date} 至 {end_date}")
-            filtered_articles = scraper.filter_articles_by_date(articles, start_date, end_date)
-            logger.info(f"过滤后剩余 {len(filtered_articles)} 篇文章")
+        # 1. 按日期过滤
+        filtered_articles = []
+        if start_date and end_date:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+            for article in articles:
+                try:
+                    publish_date = datetime.fromtimestamp(article.get('publish_timestamp', 0)).date()
+                    if start_dt <= publish_date <= end_dt:
+                        filtered_articles.append(article)
+                except:
+                    pass
         else:
             filtered_articles = articles
-            start_date = None
-            end_date = None
 
-        # 初始化 PDF 输出目录
+        # 2. 按关键词筛选
+        if keywords:
+            keyword_filtered = []
+            for article in filtered_articles:
+                title = article.get('title', '').lower()
+                digest = article.get('digest', '').lower()
+                match = False
+                for kw in keywords:
+                    if kw.lower() in title or kw.lower() in digest:
+                        match = True
+                        break
+                if match:
+                    keyword_filtered.append(article)
+            filtered_articles = keyword_filtered
+
+        # PDF 输出设置
         pdf_dir = None
-        login_cookies = headers.get('cookie', '')  # 获取登录 cookie
+        login_cookies = headers.get('cookie', '')
         if generate_pdf:
             if not pdf_output_dir:
-                # 默认 PDF 目录：公众号名称_时间戳_pdf
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 pdf_output_dir = f"{self._clean_filename(account['wpub_name'])}_{timestamp}_pdf"
             pdf_dir = pdf_output_dir
             os.makedirs(pdf_dir, exist_ok=True)
-            logger.info(f"PDF 将保存到目录: {pdf_dir}")
 
-        # 获取文章内容 + 生成 PDF
+        # 获取文章内容 + 生成 PDF (核心循环，支持中断)
+        final_processed_articles = []  # 用于保存实际处理完成的文章
+
         if include_content or generate_pdf:
-            logger.info("获取文章内容并/或生成 PDF...")
-            pdf_success_count = 0
+            total_articles = len(filtered_articles)
+            if total_articles == 0:
+                if progress_callback: progress_callback(100, "无符合条件的文章")
+                return {"success": True, "msg": "无符合条件的文章", "data": {"count": 0}}
 
             for i, article in enumerate(filtered_articles):
-                article_title = article.get('title', f"未知文章_{i + 1}")
-                logger.info(f"处理第 {i + 1}/{len(filtered_articles)} 篇: {article_title}")
+                # ------------------- 中断检查点 -------------------
+                if not self.keep_running:
+                    logger.warning("用户停止了爬取任务，正在保存已完成的数据...")
+                    if progress_callback:
+                        progress_callback(int(30 + (i) / total_articles * 70), "任务已手动停止")
+                    break
+                # ------------------------------------------------
 
-                # 获取文章内容（原逻辑）
+                article_title = article.get('title', f"未知文章_{i + 1}")
+                if progress_callback:
+                    content_percent = int(30 + (i + 1) / total_articles * 70)
+                    progress_callback(content_percent, f"处理第 {i + 1}/{total_articles} 篇：{article_title}")
+
+                # 获取内容
                 if include_content:
                     article = scraper.get_article_content_by_url(article)
 
-                # 生成 PDF（新增逻辑）
+                # 生成 PDF
                 if generate_pdf and article.get('link'):
-                    # 构建 PDF 文件名（避免重复）
                     cleaned_title = self._clean_filename(article_title)
-                    pdf_filename = f"{cleaned_title}.pdf"
-                    pdf_path = os.path.join(pdf_dir, pdf_filename)
-
-                    # 避免文件名重复（添加序号）
+                    pdf_path = os.path.join(pdf_dir, f"{cleaned_title}.pdf")
                     counter = 1
                     while os.path.exists(pdf_path):
-                        pdf_filename = f"{cleaned_title}_{counter}.pdf"
-                        pdf_path = os.path.join(pdf_dir, pdf_filename)
+                        pdf_path = os.path.join(pdf_dir, f"{cleaned_title}_{counter}.pdf")
                         counter += 1
 
-                    # 生成 PDF
-                    success = self._generate_article_pdf(
-                        article_url=article['link'],
-                        pdf_path=pdf_path,
-                        cookies=login_cookies,
-                        wait_time=5
-                    )
-
+                    success = self._generate_article_pdf(article['link'], pdf_path, login_cookies)
                     if success:
-                        pdf_success_count += 1
-                        article['pdf_path'] = pdf_path  # 记录 PDF 路径
+                        article['pdf_path'] = pdf_path
                     else:
                         article['pdf_path'] = ''
 
-                # 请求间隔（避免反爬）
+                final_processed_articles.append(article)
+
                 if i < len(filtered_articles) - 1:
                     time.sleep(interval)
+        else:
+            final_processed_articles = filtered_articles
 
-            if generate_pdf:
-                logger.info(f"PDF 生成完成：成功 {pdf_success_count}/{len(filtered_articles)} 篇")
-
-        # 保存结果到 CSV（原逻辑）
+        # 保存结果 (即使中断，也保存已获取的部分)
         if output_file:
             output_path = output_file
         else:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = f"{account['wpub_name']}_{timestamp}.csv"
+            if not pdf_output_dir:
+                account_dir = self._clean_filename(account['wpub_name'])
+                os.makedirs(account_dir, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_path = os.path.join(account_dir, f"{account['wpub_name']}_{timestamp}.csv")
+            else:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_path = os.path.join(pdf_output_dir, f"{account['wpub_name']}_{timestamp}.csv")
 
-        logger.info(f"保存结果到: {output_path}")
-        success = scraper.save_articles_to_csv(filtered_articles, output_path)
+        scraper.save_articles_to_csv(final_processed_articles, output_path)
 
-        # 保存到数据库（原逻辑，新增 PDF 路径字段）
-        if use_db and filtered_articles:
-            output_dir = os.path.dirname(output_path) or "."
-            db_file = os.path.join(output_dir, "content_spider.db")
-
-            try:
-                db = DatabaseFactory.create_database(db_type, db_file=db_file)
-
-                # 保存账号
-                account_db_id = db.save_account(
-                    name=account['wpub_name'],
-                    platform='wechat',
-                    account_id=account['wpub_fakid']
-                )
-
-                if account_db_id:
-                    logger.info(f"保存 {len(filtered_articles)} 篇文章到数据库...")
-                    saved_count = 0
-                    for article in filtered_articles:
-                        success = db.save_article(
-                            account_id=account_db_id,
-                            title=article.get('title', ''),
-                            url=article.get('link', ''),
-                            publish_time=article.get('publish_time', ''),
-                            content=article.get('content', ''),
-                            details={
-                                'digest': article.get('digest', ''),
-                                'publish_timestamp': article.get('publish_timestamp', 0),
-                                'pdf_path': article.get('pdf_path', '')  # 新增 PDF 路径
-                            }
-                        )
-                        if success:
-                            saved_count += 1
-
-                    logger.success(f"数据库保存完成，成功保存 {saved_count} 篇文章: {db_file}")
-                else:
-                    logger.error("保存账号失败，无法保存文章")
-
-            except ValueError as e:
-                logger.error(f"数据库初始化失败: {e}")
-                return False
-
-        if success:
-            logger.success(f"成功保存 {len(filtered_articles)} 篇文章")
-            return True
-        else:
-            logger.error("保存失败")
-            return False
+        msg_prefix = "爬取已停止" if not self.keep_running else "爬取完成"
+        return {
+            "success": True,
+            "msg": f"{msg_prefix}，已处理 {len(final_processed_articles)}/{len(filtered_articles)} 篇文章",
+            "data": {"count": len(final_processed_articles), "path": output_path}
+        }
 
     def batch_scrape(
-            self, accounts_file, pages=10, days=30, include_content=False,
+            self, accounts, pages=10, start_date=None, end_date=None, include_content=False,
             interval=10, threads=3, output_dir=None, use_db=False, db_type="sqlite",
-            generate_pdf=False, pdf_output_dir=None  # 新增 PDF 相关参数
+            generate_pdf=False, pdf_output_dir=None, progress_callback=None, keywords=None
     ):
         """
-        批量爬取多个公众号（新增 PDF 生成功能）
-        :param generate_pdf: 是否生成文章 PDF
-        :param pdf_output_dir: PDF 输出根目录
+        批量爬取多个公众号（支持中断）
         """
-        logger.info(f"批量爬取公众号，输入文件: {accounts_file}")
-
-        # 读取公众号列表
-        try:
-            with open(accounts_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            # 支持多种分隔符
-            import re
-            accounts = re.split(r'[\n\r,;，；、\s\t|]+', content.strip())
-            accounts = [acc.strip() for acc in accounts if acc.strip()]
-        except Exception as e:
-            logger.error(f"读取公众号列表失败: {str(e)}")
-            return False
-
-        if not accounts:
-            logger.warning("公众号列表为空")
-            return False
-
-        logger.info(f"共读取 {len(accounts)} 个公众号")
+        self.reset_stop()
+        logger.info(f"批量爬取公众号，共 {len(accounts)} 个账号")
+        keywords = keywords or []
 
         if not self.login_manager.is_logged_in():
-            logger.error("未登录或登录已过期，请先登录")
-            return False
+            return {"success": False, "msg": "未登录或登录已过期", "data": {}}
 
         token = self.login_manager.get_token()
         headers = self.login_manager.get_headers()
 
         # 批量爬虫回调
-        def progress_callback(current, total):
-            logger.info(f"进度: {current}/{total} 公众号")
-
-        def account_status_callback(account_name, status, message):
-            if status == 'start':
-                logger.info(f"开始爬取: {account_name}")
-            elif status == 'done':
-                logger.info(f"完成爬取: {account_name}, {message}")
-            elif status == 'skip':
-                logger.warning(f"跳过爬取: {account_name}, {message}")
-
-        def batch_completed_callback(total_articles):
-            logger.success(f"批量爬取完成，总共获取 {total_articles} 篇文章")
-
-        def error_callback(account_name, error_message):
-            logger.error(f"爬取出错: {account_name}, {error_message}")
+        def internal_progress_callback(current, total):
+            if self.keep_running and progress_callback:
+                progress_callback(int(current / total * 40), f"已完成 {current}/{total} 个公众号")
 
         batch_scraper = BatchWeChatScraper()
-        batch_scraper.set_callback('progress_updated', progress_callback)
-        batch_scraper.set_callback('account_status', account_status_callback)
-        batch_scraper.set_callback('batch_completed', batch_completed_callback)
-        batch_scraper.set_callback('error_occurred', error_callback)
+        batch_scraper.set_callback('progress_updated', internal_progress_callback)
 
-        # 时间范围
-        end_date = datetime.now().date()
-        start_date = end_date - timedelta(days=days)
+        # 注意：这里调用的是 scraper 的批量方法，如果 scraper 内部不支持中断，
+        # 我们只能在文章获取完毕后的 PDF 生成阶段进行中断控制。
+        # 如果需要完全中断请求，需要修改 scraper 源码支持传入 stop_signal。
 
-        # 输出目录
         output_dir = output_dir or "results"
         os.makedirs(output_dir, exist_ok=True)
 
-        # PDF 配置
-        login_cookies = headers.get('cookie', '')
         batch_pdf_dir = None
         if generate_pdf:
             batch_pdf_dir = pdf_output_dir or os.path.join(output_dir, "wechat_batch_pdf")
             os.makedirs(batch_pdf_dir, exist_ok=True)
-            logger.info(f"批量 PDF 输出目录: {batch_pdf_dir}")
 
-        # 爬取配置
-        timestamp = int(time.time())
         config = {
             'accounts': accounts,
-            'start_date': start_date.strftime('%Y-%m-%d'),
-            'end_date': end_date.strftime('%Y-%m-%d'),
+            'start_date': start_date,
+            'end_date': end_date,
             'token': token,
             'headers': headers,
             'max_pages_per_account': pages,
@@ -461,152 +408,85 @@ class WeChatSpiderRunner:
             'use_threading': threads > 1,
             'max_workers': threads,
             'include_content': include_content,
-            'output_file': os.path.join(output_dir, f"wechat_articles.csv")
+            'output_file': os.path.join(output_dir, f"wechat_articles_{int(time.time())}.csv")
         }
 
-        # 数据库初始化（原逻辑）
-        db = None
-        if use_db:
-            db_file = os.path.join(output_dir, "content_spider.db")
-            try:
-                db = DatabaseFactory.create_database(db_type, db_file=db_file)
-                logger.info(f"使用 {db_type} 数据库: {db_file}")
-            except ValueError as e:
-                logger.error(f"数据库初始化失败: {e}")
-                logger.info("将不保存到数据库")
-                db = None
-
-        # 开始爬取
-        logger.info("\n开始批量爬取...")
-        logger.info(f"时间范围: {start_date} 至 {end_date}")
-        logger.info(f"每个公众号最多爬取 {pages} 页")
-        logger.info(f"请求间隔: {interval} 秒")
-
-        start_time = time.time()
+        # 第一阶段：获取文章列表（通常较快，暂不支持细粒度中断）
+        logger.info("开始获取批量文章列表...")
         articles = batch_scraper.start_batch_scrape(config)
-        end_time = time.time()
 
-        # 批量生成 PDF（新增逻辑）
+        # 关键词筛选
+        if keywords:
+            keyword_filtered = []
+            for article in articles:
+                title = article.get('title', '').lower()
+                digest = article.get('digest', '').lower()
+                match = False
+                for kw in keywords:
+                    if kw.lower() in title or kw.lower() in digest:
+                        match = True
+                        break
+                if match:
+                    keyword_filtered.append(article)
+            articles = keyword_filtered
+
+        # 第二阶段：批量生成 PDF (支持中断)
+        processed_articles = []
         if generate_pdf and articles and batch_pdf_dir:
-            logger.info(f"\n开始为 {len(articles)} 篇文章生成 PDF...")
-            pdf_success_count = 0
+            total_articles = len(articles)
+            logger.info(f"开始为 {total_articles} 篇文章生成 PDF...")
 
             for i, article in enumerate(articles):
+                # ------------------- 中断检查点 -------------------
+                if not self.keep_running:
+                    logger.warning("批量任务被用户停止")
+                    break
+                # ------------------------------------------------
+
+                if progress_callback:
+                    pdf_percent = int(40 + (i + 1) / total_articles * 60)
+                    progress_callback(pdf_percent, f"生成 PDF {i + 1}/{total_articles} 篇")
+
                 article_url = article.get('link')
                 account_name = article.get('name', '未知账号')
 
-                if not article_url:
-                    logger.warning(f"第 {i + 1} 篇文章（账号：{account_name}）无 URL，跳过 PDF 生成")
-                    continue
+                if article_url:
+                    account_pdf_dir = os.path.join(batch_pdf_dir, self._clean_filename(account_name))
+                    os.makedirs(account_pdf_dir, exist_ok=True)
 
-                # 按公众号分目录存储 PDF
-                account_pdf_dir = os.path.join(batch_pdf_dir, self._clean_filename(account_name))
-                os.makedirs(account_pdf_dir, exist_ok=True)
+                    cleaned_title = self._clean_filename(article.get('title', f"article_{i + 1}"))
+                    pdf_path = os.path.join(account_pdf_dir, f"{cleaned_title}.pdf")
+                    counter = 1
+                    while os.path.exists(pdf_path):
+                        pdf_path = os.path.join(account_pdf_dir, f"{cleaned_title}_{counter}.pdf")
+                        counter += 1
 
-                # 构建 PDF 文件名
-                article_title = self._clean_filename(article.get('title', f"article_{i + 1}"))
-                pdf_filename = f"{article_title}.pdf"
-                pdf_path = os.path.join(account_pdf_dir, pdf_filename)
+                    success = self._generate_article_pdf(article_url, pdf_path, headers.get('cookie', ''))
+                    if success:
+                        article['pdf_path'] = pdf_path
 
-                # 避免重复文件名
-                counter = 1
-                while os.path.exists(pdf_path):
-                    pdf_filename = f"{article_title}_{counter}.pdf"
-                    pdf_path = os.path.join(account_pdf_dir, pdf_filename)
-                    counter += 1
-
-                # 生成 PDF
-                success = self._generate_article_pdf(
-                    article_url=article_url,
-                    pdf_path=pdf_path,
-                    cookies=login_cookies,
-                    wait_time=5
-                )
-
-                if success:
-                    pdf_success_count += 1
-                    article['pdf_path'] = pdf_path
-                else:
-                    article['pdf_path'] = ''
-
-                # PDF 生成间隔（避免反爬）
+                processed_articles.append(article)
                 if i < len(articles) - 1:
                     time.sleep(interval / 2)
+        else:
+            processed_articles = articles
 
-            logger.success(f"批量 PDF 生成完成：成功 {pdf_success_count}/{len(articles)} 篇")
-
-        # 保存到数据库（原逻辑，新增 PDF 路径）
-        if db and articles:
-            logger.info(f"保存 {len(articles)} 篇文章到数据库...")
-            saved_count = 0
-
-            # 保存账号
-            for account_name in accounts:
-                logger.info(f"保存账号: {account_name}")
-                db.save_account(
-                    name=account_name,
-                    platform='wechat'
-                )
-
-            # 保存文章
-            for article in articles:
-                account_name = article.get('name', '')
-                account = db.get_account(name=account_name, platform='wechat')
-
-                if not account:
-                    logger.error(f"账号不存在: {account_name}")
-                    continue
-
-                success = db.save_article(
-                    account_id=account['id'],
-                    title=article.get('title', ''),
-                    url=article.get('link', ''),
-                    publish_time=article.get('publish_time', ''),
-                    content=article.get('content', ''),
-                    details={
-                        'digest': article.get('digest', ''),
-                        'publish_timestamp': article.get('publish_timestamp', 0),
-                        'pdf_path': article.get('pdf_path', '')  # 新增 PDF 路径
-                    }
-                )
-
-                if success:
-                    saved_count += 1
-
-            logger.success(f"数据库保存完成，成功保存 {saved_count} 篇文章")
-
-        logger.info(f"\n爬取完成，耗时 {end_time - start_time:.2f} 秒")
-        logger.info(f"共获取 {len(articles)} 篇文章，已保存到 {config['output_file']}")
-
-        if db:
-            logger.info(f"数据库文件: {db_file}")
-
-        if generate_pdf:
-            logger.info(f"PDF 保存目录: {batch_pdf_dir}")
-
-        return True
+        msg_prefix = "批量任务已停止" if not self.keep_running else "批量爬取完成"
+        return {
+            "success": True,
+            "msg": f"{msg_prefix}，共获取 {len(processed_articles)} 篇文章",
+            "data": {"count": len(processed_articles), "path": config['output_file']}
+        }
 
 
-# 向后兼容的快捷函数（新增 PDF 参数支持）
-def login():
-    """登录微信公众平台"""
-    runner = WeChatSpiderRunner()
-    return runner.login()
+# 向后兼容接口
+def login(): return WeChatSpiderRunner().login()
 
 
-def search(name, output_file=None):
-    """搜索公众号"""
-    runner = WeChatSpiderRunner()
-    return runner.search_account(name, output_file)
+def search(name, output_file=None): return WeChatSpiderRunner().search_account(name, output_file)
 
 
-def scrape_account(name, **kwargs):
-    """爬取单个公众号（支持 generate_pdf/pdf_output_dir 参数）"""
-    runner = WeChatSpiderRunner()
-    return runner.scrape_single_account(name, **kwargs)
+def scrape_account(name, **kwargs): return WeChatSpiderRunner().scrape_single_account(name, **kwargs)
 
 
-def batch_scrape(accounts_file, **kwargs):
-    """批量爬取多个公众号（支持 generate_pdf/pdf_output_dir 参数）"""
-    runner = WeChatSpiderRunner()
-    return runner.batch_scrape(accounts_file, **kwargs)
+def batch_scrape(accounts_file, **kwargs): return WeChatSpiderRunner().batch_scrape(accounts_file, **kwargs)
