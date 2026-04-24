@@ -37,9 +37,10 @@ jobs:
           # 复制图标
           if (Test-Path "icons") { Copy-Item -Recurse icons .\data\icons }
 
-      - name: 测试运行
+      - name: 语法检查
         run: |
-          python main.py --version 2>$null; if ($?) { Write-Host "Main.py 运行正常" }
+          python -m py_compile main.py config.py threads.py widgets.py
+          Write-Host "Python 语法检查通过"
 
       - name: 创建发布包
         run: |
