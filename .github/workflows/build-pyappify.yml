@@ -39,7 +39,11 @@ jobs:
 
       - name: 安装依赖（仅检查）
         run: |
-          pip install -r requirements.txt
+          if [ "${{ matrix.os_name }}" = "macos" ]; then
+            pip install -r requirements-macos.txt
+          else
+            pip install -r requirements.txt
+          fi
         shell: bash
 
       - name: 下载 pyappify 启动器
