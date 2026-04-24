@@ -14,7 +14,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: 检出代码
+      - name: 检出 MediaSpider 代码
         uses: actions/checkout@v4
 
       - name: 设置 Python
@@ -22,16 +22,45 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 安装依赖
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - name: 检出 pyappify
+        uses: actions/checkout@v4
+        with:
+          repository: ok-oldking/pyappify
+          path: pyappify-src
+
+      - name: 安装 pyappify 依赖
+        run: |
+          cd pyappify-src
+          pnpm install
+        shell: bash
+
+      - name: 编译 pyappify
+        run: |
+          cd pyappify-src
+          pnpm tauri build
+        shell: bash
+
+      - name: 复制 pyappify.exe
+        run: |
+          Copy-Item "pyappify-src\src-tauri\target\release\pyappify.exe" .
+          Write-Host "pyappify.exe 编译完成"
+
+      - name: 安装 MediaSpider 依赖（语法检查）
         run: |
           pip install -r requirements.txt
-
-      - name: 下载 pyappify 启动器
-        run: |
-          curl -L https://github.com/ok-oldking/pyappify/releases/latest/download/pyappify.exe -o pyappify.exe
-
-      - name: 语法检查
-        run: |
           python -m py_compile main.py config.py threads.py widgets.py
           Write-Host "Python 语法检查通过"
 
@@ -44,40 +73,3 @@ jobs:
         with:
           files: MediaSpider-${{ github.ref_name }}-windows.zip
           generate_release_notes: true
-
-  build-macos:
-    permissions:
-      contents: write
-    runs-on: macos-latest
-
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 设置 Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: 安装依赖
-        run: |
-          pip install -r requirements-macos.txt
-
-      - name: 下载 pyappify 启动器
-        run: |
-          curl -L https://github.com/ok-oldking/pyappify/releases/latest/download/pyappify-macos -o pyappify
-          chmod +x pyappify
-
-      - name: 语法检查
-        run: |
-          python -m py_compile main.py config.py threads.py widgets.py
-          echo "Python 语法检查通过"
-
-      - name: 创建发布包
-        run: |
-          zip -r "MediaSpider-${{ github.ref_name }}-macos.zip" pyappify pyappify.yml icons requirements.txt main.py config.py threads.py widgets.py spider
-
-      - name: 上传 Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: MediaSpider-${{ github.ref_name }}-macos.zip
