@@ -11,7 +11,22 @@ jobs:
   build:
     permissions:
       contents: write
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            os_name: windows
+            runner: windows-latest
+            launcher: pyappify.exe
+            archive_name: MediaSpider-${{ github.ref_name }}-windows.zip
+          - platform: macos-latest
+            os_name: macos
+            runner: macos-latest
+            launcher: pyappify
+            archive_name: MediaSpider-${{ github.ref_name }}-macos.zip
+
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: 检出代码
@@ -22,32 +37,38 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 安装依赖
+      - name: 安装依赖（仅检查）
         run: |
           pip install -r requirements.txt
-          pip install pyinstaller
+        shell: bash
 
       - name: 下载 pyappify 启动器
         run: |
-          curl -L https://github.com/ok-oldking/pyappify/releases/latest/download/pyappify.exe -o pyappify.exe
-
-      - name: 复制必要文件
-        run: |
-          # pyappify.yml 已存在
-          # 复制图标
-          if (Test-Path "icons") { Copy-Item -Recurse icons .\data\icons }
+          if [ "${{ matrix.os_name }}" = "windows" ]; then
+            curl -L https://github.com/ok-oldking/pyappify/releases/latest/download/pyappify.exe -o pyappify.exe
+          else
+            curl -L https://github.com/ok-oldking/pyappify/releases/latest/download/pyappify-macos -o pyappify
+            chmod +x pyappify
+          fi
+        shell: bash
 
       - name: 语法检查
         run: |
           python -m py_compile main.py config.py threads.py widgets.py
-          Write-Host "Python 语法检查通过"
+          echo "Python 语法检查通过"
+        shell: bash
 
       - name: 创建发布包
         run: |
-          Compress-Archive -Path @("pyappify.exe","pyappify.yml","data","icons","requirements.txt","main.py","config.py","threads.py","widgets.py","spider") -DestinationPath "MediaSpider-${{ github.ref_name }}.zip"
+          if [ "${{ matrix.os_name }}" = "windows" ]; then
+            Compress-Archive -Path @("pyappify.exe","pyappify.yml","icons","requirements.txt","main.py","config.py","threads.py","widgets.py","spider") -DestinationPath "${{ matrix.archive_name }}"
+          else
+            zip -r "${{ matrix.archive_name }}" pyappify pyappify.yml icons requirements.txt main.py config.py threads.py widgets.py spider
+          fi
+        shell: bash
 
       - name: 上传 Release
         uses: softprops/action-gh-release@v2
         with:
-          files: MediaSpider-${{ github.ref_name }}.zip
+          files: ${{ matrix.archive_name }}
           generate_release_notes: true
