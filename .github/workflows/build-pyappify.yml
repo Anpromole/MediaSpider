@@ -1,0 +1,52 @@
+# MediaSpider - PyAppify 自动打包工作流
+name: Build PyAppify Package
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送版本标签时触发，如 v1.0.0
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: 下载 pyappify 启动器
+        run: |
+          curl -L https://github.com/ok-oldking/pyappify/releases/latest/download/pyappify.exe -o pyappify.exe
+
+      - name: 复制必要文件
+        run: |
+          # pyappify.yml 已存在
+          # 复制图标
+          if (Test-Path "icons") { Copy-Item -Recurse icons .\data\icons }
+
+      - name: 测试运行
+        run: |
+          python main.py --version 2>$null; if ($?) { Write-Host "Main.py 运行正常" }
+
+      - name: 创建发布包
+        run: |
+          Compress-Archive -Path @("pyappify.exe","pyappify.yml","data","icons","requirements.txt","main.py","config.py","threads.py","widgets.py","spider") -DestinationPath "MediaSpider-${{ github.ref_name }}.zip"
+
+      - name: 上传 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MediaSpider-${{ github.ref_name }}.zip
+          generate_release_notes: true

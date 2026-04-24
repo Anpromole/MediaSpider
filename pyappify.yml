@@ -1,0 +1,16 @@
+# PyAppify 配置文件 - MediaSpider
+name: "MediaSpider"
+description: "道路塌陷爬虫系统 - 微信公众号、微博、RSS 采集和 AI 总结"
+icon: "icons/icon.ico"
+
+profiles:
+  - name: "release"
+    git_url: "https://github.com/Anpromole/MediaSpider.git"
+    main_script: "main.py"
+    requires_python: "3.10"
+    requirements: "requirements.txt"
+    pip_args: "--index-url https://mirrors.cloud.tencent.com/pypi/simple"
+
+  - name: "debug"
+    main_script: "main.py"
+    pip_args: "-i https://pypi.tuna.tsinghua.edu.cn/simple"
