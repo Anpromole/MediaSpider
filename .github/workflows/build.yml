@@ -1,4 +1,5 @@
 name: Build MediaSpider
+
 on:
   push:
     tags:
@@ -7,10 +8,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    
-    # 【关键修复 1】：赋予 GitHub Actions 创建 Release 和上传文件的写权限
     permissions:
-      contents: write 
+      contents: write
 
     steps:
       - name: Checkout Code
@@ -24,8 +23,6 @@ jobs:
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
-          # 【关键修复 2】：扩大匹配范围。如果不知道确切名字，可以直接匹配所有生成的 zip 文件
-          # 如果之前作者的 action 输出在特定目录，你可能需要写成 release/*.zip 或类似的路径
           files: |
-            *.zip 
+            *.zip
             */*.zip
