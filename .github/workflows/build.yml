@@ -1,0 +1,22 @@
+name: Build MediaSpider
+on:
+  push:
+    tags:
+      - 'v*' # 当你推送 v 开头的 tag 时自动触发打包
+
+jobs:
+  build:
+    runs-on: windows-latest # 指定在 Windows 环境下编译 .exe
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build with PyAppify
+        uses: ok-oldking/pyappify-action@v1
+        with:
+          config: pyappify.yml # 指定配置文件
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: pyappify-release-*.zip # 具体的输出文件名可能需要根据 action 的日志调整
