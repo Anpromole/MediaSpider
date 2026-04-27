@@ -1,7 +1,7 @@
 # PyAppify 配置文件 - MediaSpider
 name: "MediaSpider"
 description: "道路塌陷爬虫系统 - 微信公众号、微博、RSS 采集和 AI 总结"
-icon: "icons/icon.ico"
+# icon: "icons/icon.ico"  # 已删除 icons 文件夹，暂时注释
 
 profiles:
   - name: "release"
