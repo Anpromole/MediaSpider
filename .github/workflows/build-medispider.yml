@@ -1,0 +1,28 @@
+# MediaSpider - 触发 pyappify 构建工作流
+name: Build MediaSpider App
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例如: 1.2.1)'
+        required: true
+        default: '1.2.1'
+
+jobs:
+  trigger-pyappify-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 触发 pyappify 构建
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.PYAPPIFY_PAT }}
+          repository: Anpromole/pyappify
+          event-type: build-medispider
+          client-payload: '{"version": "${{ github.event.inputs.version }}", "source_repo": "Anpromole/MediaSpider"}'
+
+      - name: 显示构建信息
+        run: |
+          echo "已触发 pyappify 仓库的构建流程"
+          echo "版本号：${{ github.event.inputs.version }}"
+          echo "请前往 https://github.com/Anpromole/pyappify/actions 查看构建进度"
