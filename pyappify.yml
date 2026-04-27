@@ -13,5 +13,3 @@ profiles:
     requires_python: "3.10"
     # 依赖文件
     requirements: "requirements.txt"
-    # 如果在国内使用，建议添加镜像源加速依赖安装
-    pip_args: "--index-url https://pypi.tuna.tsinghua.edu.cn/simple"
