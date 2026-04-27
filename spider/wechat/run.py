@@ -356,7 +356,11 @@ class WeChatSpiderRunner:
         return {
             "success": True,
             "msg": f"{msg_prefix}，已处理 {len(final_processed_articles)}/{len(filtered_articles)} 篇文章",
-            "data": {"count": len(final_processed_articles), "path": output_path}
+            "data": {
+                "count": len(final_processed_articles),
+                "path": output_path,
+                "articles": final_processed_articles  # 返回文章数据供 AI 总结使用
+            }
         }
 
     def batch_scrape(

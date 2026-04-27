@@ -214,3 +214,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# MediaSpider 本地缓存（不被同步删除）
+.data/
+.config/
+*.db
+*.sqlite

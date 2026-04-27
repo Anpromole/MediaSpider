@@ -65,7 +65,8 @@ class WeChatSpiderLogin:
         self.temp_user_data_dir = None
 
     def save_cache(self):
-        """保存token和cookies到缓存文件"""
+        """保存 token 和 cookies 到缓存文件"""
+        logger.info(f"[DEBUG] save_cache 被调用，token={self.token is not None}, cookies={self.cookies is not None}")
         if self.token and self.cookies:
             cache_data = {
                 'token': self.token,
@@ -73,14 +74,17 @@ class WeChatSpiderLogin:
                 'timestamp': datetime.now().timestamp()
             }
             try:
+                logger.info(f"[DEBUG] 准备写入缓存文件：{self.cache_file}")
                 with open(self.cache_file, 'w', encoding='utf-8') as f:
                     json.dump(cache_data, f, ensure_ascii=False, indent=2)
                 logger.success(f"登录信息已保存到缓存文件 {self.cache_file}")
                 return True
             except Exception as e:
-                logger.error(f"保存缓存失败: {e}")
+                logger.error(f"保存缓存失败：{e}")
                 return False
-        return False
+        else:
+            logger.error(f"save_cache 失败：token 或 cookies 为空")
+            return False
 
     def load_cache(self):
         """从缓存文件加载token和cookies"""

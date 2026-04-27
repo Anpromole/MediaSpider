@@ -31,8 +31,7 @@ from spider.weibo.run import WeiboSpiderRunner
 from spider.rss.collector import RSSCollector
 from spider.dify.client import DifyClient
 from spider.dify.summarizer import NewsSummarizer
-from threads import BrowserInstaller, SpiderWorker, UploadWorker, AutoTaskWorker
-from config import AutoTaskConfig
+from threads import BrowserInstaller, SpiderWorker
 from widgets import ChatBubble
 from config import (
     DEFAULT_PDF_DIR, SYSTEM_TITLE, WINDOW_SIZE, LOG_LIST_MAX_WIDTH_OFFSET,
@@ -74,38 +73,6 @@ class WeChatSpiderUI(QMainWindow):
         # 加载保存的配置
         self.load_user_config()
 
-        # 自动化任务 worker
-        self.auto_worker = None
-
-    def get_data_path(self):
-        """获取数据文件路径"""
-        import os
-        data_dir = os.path.join(os.path.dirname(__file__), '.data')
-        os.makedirs(data_dir, exist_ok=True)
-        return os.path.join(data_dir, 'articles.json')
-
-    def _save_wechat_articles(self):
-        """保存微信文章数据"""
-        articles = getattr(self, '_last_wechat_articles', [])
-        if articles:
-            try:
-                with open(self.get_data_path(), 'w', encoding='utf-8') as f:
-                    json.dump(articles, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                pass
-
-    def _load_wechat_articles(self):
-        """加载微信文章数据"""
-        data_path = self.get_data_path()
-        if os.path.exists(data_path):
-            try:
-                with open(data_path, 'r', encoding='utf-8') as f:
-                    articles = json.load(f)
-                self._last_wechat_articles = articles
-                self.add_log_msg("系统", f"📄 已加载上次爬取的 {len(articles)} 篇文章")
-            except Exception as e:
-                pass
-
     def get_config_path(self):
         """获取配置文件路径"""
         import os
@@ -115,94 +82,29 @@ class WeChatSpiderUI(QMainWindow):
 
     def save_user_config(self):
         """保存用户配置"""
-        import os
-        import traceback
+        config = {
+            'keywords': self.keywords_edit.text(),
+            'pages': self.page_spin.value(),
+            'start_date': self.start_date_edit.date().toString("yyyy-MM-dd"),
+            'end_date': self.end_date_edit.date().toString("yyyy-MM-dd"),
+            'generate_pdf': self.pdf_check.isChecked(),
+            'pdf_dir': self.pdf_dir,
+            'task_accounts': self.task_accounts.toPlainText(),
+            'task_keywords': self.task_keywords.text(),
+            'frequency': self.freq_spin.value(),
+            'weibo_keyword': self.weibo_keyword_input.text(),
+            'weibo_pages': self.weibo_pages_spin.value(),
+            'rss_keyword': self.rss_keyword_input.text(),
+            'dify_topic': self.dify_topic_input.text(),
+        }
         try:
-            config = {}
-            # 逐项保存，定位报错位置
-            try:
-                config['keywords'] = self.keywords_edit.text()
-                print("[OK] keywords_edit")
-            except Exception as e:
-                print(f"[FAIL] keywords_edit: {e}")
-
-            try:
-                config['pages'] = self.page_spin.value()
-                print("[OK] page_spin")
-            except Exception as e:
-                print(f"[FAIL] page_spin: {e}")
-
-            try:
-                config['start_date'] = self.start_date_edit.date().toString("yyyy-MM-dd")
-                config['end_date'] = self.end_date_edit.date().toString("yyyy-MM-dd")
-                print("[OK] date edits")
-            except Exception as e:
-                print(f"[FAIL] date edits: {e}")
-
-            try:
-                config['generate_pdf'] = self.pdf_check.isChecked()
-                config['pdf_dir'] = self.pdf_dir
-                print("[OK] pdf config")
-            except Exception as e:
-                print(f"[FAIL] pdf config: {e}")
-
-            # 自动化任务配置
-            try:
-                config['wechat_accounts'] = self.wechat_accounts_edit.toPlainText()
-                config['wechat_keywords'] = self.wechat_keyword_edit.toPlainText()
-                config['weibo_keywords'] = self.weibo_keyword_edit.toPlainText()
-                config['rss_keywords'] = self.rss_keyword_edit.toPlainText()
-                print("[OK] auto task config")
-            except Exception as e:
-                print(f"[FAIL] auto task config: {e}")
-
-            try:
-                config['auto_start_date'] = self.auto_start_date.date().toString("yyyy-MM-dd")
-                config['auto_end_date'] = self.auto_end_date.date().toString("yyyy-MM-dd")
-                config['auto_pdf'] = self.auto_pdf_check.isChecked()
-                config['dify_upload'] = self.dify_upload_check.isChecked()
-                print("[OK] auto date & checks")
-            except Exception as e:
-                print(f"[FAIL] auto date & checks: {e}")
-
-            try:
-                config['timer_enabled'] = self.timer_check.isChecked()
-                config['timer_frequency'] = self.timer_freq_spin.value()
-                print("[OK] timer config")
-            except Exception as e:
-                print(f"[FAIL] timer config: {e}")
-
-            # 微博和 RSS
-            try:
-                config['weibo_keyword'] = self.weibo_keyword_input.text()
-                config['weibo_pages'] = self.weibo_pages_spin.value()
-                config['rss_keyword'] = self.rss_keyword_input.text()
-                config['dify_topic'] = self.dify_topic_input.text()
-                print("[OK] weibo/rss config")
-            except Exception as e:
-                print(f"[FAIL] weibo/rss config: {e}")
-
-            # 微信文章和登录凭证
-            try:
-                config['wechat_articles'] = getattr(self, '_last_wechat_articles', [])
-                config['login_status'] = self.login_status
-                config['current_account'] = self.current_account
-                print("[OK] articles & login info")
-            except Exception as e:
-                print(f"[FAIL] articles & login info: {e}")
-
-            # 写入文件
-            if config:
-                with open(self.get_config_path(), 'w', encoding='utf-8') as f:
-                    json.dump(config, f, ensure_ascii=False, indent=2)
-                print("[OK] config saved")
+            with open(self.get_config_path(), 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[CRITICAL] save_user_config failed: {e}")
-            print(traceback.format_exc())
+            self.add_log_msg("系统", f"⚠️ 保存配置失败：{e}")
 
     def load_user_config(self):
         """加载用户配置"""
-        import os
         config_path = self.get_config_path()
         if not os.path.exists(config_path):
             return
@@ -220,52 +122,13 @@ class WeChatSpiderUI(QMainWindow):
             if config.get('pdf_dir'):
                 self.pdf_dir = config['pdf_dir']
                 self.dir_btn.setText(f"已选：.../{os.path.basename(self.pdf_dir)}")
-
-            # 自动化任务配置（使用正确的变量名）
-            self.wechat_accounts_edit.setPlainText(config.get('wechat_accounts', ''))
-            self.wechat_keyword_edit.setPlainText(config.get('wechat_keywords', ''))
-            self.weibo_keyword_edit.setPlainText(config.get('weibo_keywords', ''))
-            self.rss_keyword_edit.setPlainText(config.get('rss_keywords', ''))
-            if config.get('auto_start_date'):
-                self.auto_start_date.setDate(QDate.fromString(config['auto_start_date'], "yyyy-MM-dd"))
-            if config.get('auto_end_date'):
-                self.auto_end_date.setDate(QDate.fromString(config['auto_end_date'], "yyyy-MM-dd"))
-            self.auto_pdf_check.setChecked(config.get('auto_pdf', True))
-            self.dify_upload_check.setChecked(config.get('dify_upload', True))
-            self.timer_check.setChecked(config.get('timer_enabled', False))
-            self.timer_freq_spin.setValue(config.get('timer_frequency', 1))
-
+            self.task_accounts.setPlainText(config.get('task_accounts', ''))
+            self.task_keywords.setText(config.get('task_keywords', ''))
+            self.freq_spin.setValue(config.get('frequency', 1))
             self.weibo_keyword_input.setText(config.get('weibo_keyword', DEFAULT_TOPIC))
             self.weibo_pages_spin.setValue(config.get('weibo_pages', 5))
             self.rss_keyword_input.setText(config.get('rss_keyword', DEFAULT_TOPIC))
             self.dify_topic_input.setText(config.get('dify_topic', DEFAULT_TOPIC))
-
-            # 加载上次爬取的微信文章
-            self._load_wechat_articles()
-
-            # 加载微信登录凭证
-            self.login_status = config.get('login_status', False)
-            self.current_account = config.get('current_account', None)
-
-            # 更新登录状态显示
-            if self.login_status:
-                self.login_status_label.setText("当前状态：已登录 ✅")
-                self.login_status_label.setStyleSheet("""
-                    color: #10b981;
-                    font-size: 14px;
-                    margin-top: 10px;
-                    font-weight: 500;
-                """)
-                self.login_btn.setEnabled(True)
-            else:
-                self.login_status_label.setText("当前状态：未登录 🚫")
-                self.login_status_label.setStyleSheet("""
-                    color: #ef4444;
-                    font-size: 14px;
-                    margin-top: 10px;
-                    font-weight: 500;
-                """)
-                self.login_btn.setEnabled(True)
 
             self.add_log_msg("系统", "✅ 已自动加载上次保存的配置")
         except Exception as e:
@@ -501,128 +364,41 @@ class WeChatSpiderUI(QMainWindow):
         card3.setLayout(c3_layout)
         cards.append(card3)
 
-        # 4. 自动化任务配置
-        card4 = self.create_function_card("4. 自动化任务配置")
+        # 4. 定时任务
+        card4 = self.create_function_card("4. 定时任务")
         c4_layout = QVBoxLayout()
         c4_layout.setSpacing(8)
 
-        # 渠道选择
-        channel_row = QHBoxLayout()
-        self.wechat_check = QCheckBox("微信")
-        self.wechat_check.setChecked(True)
-        self.weibo_check = QCheckBox("微博")
-        self.weibo_check.setChecked(True)
-        self.rss_check = QCheckBox("RSS")
-        self.rss_check.setChecked(True)
-        channel_row.addWidget(QLabel("渠道:"))
-        channel_row.addWidget(self.wechat_check)
-        channel_row.addWidget(self.weibo_check)
-        channel_row.addWidget(self.rss_check)
-        c4_layout.addLayout(channel_row)
+        self.task_accounts = QTextEdit()
+        self.task_accounts.setPlaceholderText("公众号，每行一个")
+        self.task_accounts.setMaximumHeight(60)
+        c4_layout.addWidget(QLabel("公众号列表"))
+        c4_layout.addWidget(self.task_accounts)
 
-        # 微信公众号配置
-        self.wechat_accounts_edit = QTextEdit()
-        self.wechat_accounts_edit.setPlaceholderText("公众号名称，每行一个（可选）")
-        self.wechat_accounts_edit.setMaximumHeight(50)
-        c4_layout.addWidget(QLabel("微信公众号:"))
-        c4_layout.addWidget(self.wechat_accounts_edit)
+        self.task_keywords = QLineEdit()
+        self.task_keywords.setPlaceholderText("关键词")
+        self.task_keywords.setFixedHeight(32)
+        c4_layout.addWidget(self.task_keywords)
 
-        # 关键词配置
-        c4_layout.addWidget(QLabel("微信关键词 (每行一个):"))
-        self.wechat_keyword_edit = QTextEdit()
-        self.wechat_keyword_edit.setPlaceholderText("道路塌陷，燃气泄漏，路面坍塌")
-        self.wechat_keyword_edit.setMaximumHeight(40)
-        c4_layout.addWidget(self.wechat_keyword_edit)
+        freq_row = QHBoxLayout()
+        freq_row.addWidget(QLabel("频率"))
+        self.freq_spin = QSpinBox()
+        self.freq_spin.setRange(1, 24)
+        self.freq_spin.setValue(1)
+        freq_row.addWidget(self.freq_spin)
+        freq_row.addWidget(QLabel("小时"))
+        c4_layout.addLayout(freq_row)
 
-        c4_layout.addWidget(QLabel("微博关键词 (每行一个):"))
-        self.weibo_keyword_edit = QTextEdit()
-        self.weibo_keyword_edit.setPlaceholderText("道路塌陷，路面塌陷")
-        self.weibo_keyword_edit.setMaximumHeight(40)
-        c4_layout.addWidget(self.weibo_keyword_edit)
-
-        c4_layout.addWidget(QLabel("RSS 关键词 (每行一个):"))
-        self.rss_keyword_edit = QTextEdit()
-        self.rss_keyword_edit.setPlaceholderText("道路塌陷，地陷")
-        self.rss_keyword_edit.setMaximumHeight(40)
-        c4_layout.addWidget(self.rss_keyword_edit)
-
-        # 日期范围配置
-        date_row = QHBoxLayout()
-        date_row.addWidget(QLabel("起始:"))
-        self.auto_start_date = QDateEdit()
-        self.auto_start_date.setDate(QDate.currentDate().addDays(-7))
-        self.auto_start_date.setDisplayFormat("yyyy-MM-dd")
-        self.auto_start_date.setFixedHeight(32)
-        date_row.addWidget(self.auto_start_date)
-        date_row.addWidget(QLabel("至:"))
-        self.auto_end_date = QDateEdit()
-        self.auto_end_date.setDate(QDate.currentDate())
-        self.auto_end_date.setDisplayFormat("yyyy-MM-dd")
-        self.auto_end_date.setFixedHeight(32)
-        date_row.addWidget(self.auto_end_date)
-        c4_layout.addLayout(date_row)
-
-        # PDF 和 Dify 配置
-        pdf_row = QHBoxLayout()
-        self.auto_pdf_check = QCheckBox("生成 PDF")
-        self.auto_pdf_check.setChecked(True)
-        self.dify_upload_check = QCheckBox("上传 Dify")
-        self.dify_upload_check.setChecked(True)
-        pdf_row.addWidget(self.auto_pdf_check)
-        pdf_row.addWidget(self.dify_upload_check)
-        c4_layout.addLayout(pdf_row)
-
-        # 定时任务配置
-        timer_group = QGroupBox("定时执行")
-        timer_layout = QHBoxLayout()
-        self.timer_check = QCheckBox("启用定时任务")
-        self.timer_check.setChecked(False)
-        self.timer_freq_spin = QSpinBox()
-        self.timer_freq_spin.setRange(1, 24)
-        self.timer_freq_spin.setValue(1)
-        self.timer_freq_spin.setFixedHeight(32)
-        timer_layout.addWidget(self.timer_check)
-        timer_layout.addWidget(QLabel("每"))
-        timer_layout.addWidget(self.timer_freq_spin)
-        timer_layout.addWidget(QLabel("小时执行一次"))
-        timer_layout.addStretch()
-        timer_group.setLayout(timer_layout)
-        c4_layout.addWidget(timer_group)
-
-        # 进度显示
-        self.auto_progress_label = QLabel("进度")
-        self.auto_progress_percent = QLabel("0%")
-        self.auto_progress_percent.setMinimumWidth(50)
-        self.auto_progress_percent.setAlignment(Qt.AlignRight)
-        progress_row = QHBoxLayout()
-        progress_row.addWidget(self.auto_progress_label)
-        progress_row.addStretch()
-        progress_row.addWidget(self.auto_progress_percent)
-        c4_layout.addLayout(progress_row)
-        self.auto_pbar = QProgressBar()
-        self.auto_pbar.setRange(0, 100)
-        self.auto_pbar.setValue(0)
-        self.auto_pbar.setFixedHeight(10)
-        self.auto_pbar.setTextVisible(False)
-        c4_layout.addWidget(self.auto_pbar)
-
-        # 按钮行
-        auto_btn_row = QHBoxLayout()
-        self.auto_run_once_btn = QPushButton("▶ 手动执行一次")
-        self.auto_run_once_btn.setFixedHeight(40)
-        self.auto_run_once_btn.clicked.connect(self.run_auto_once)
-        self.auto_start_btn = QPushButton("▶ 启动定时任务")
-        self.auto_start_btn.setFixedHeight(40)
-        self.auto_start_btn.clicked.connect(self.start_auto_timer)
-        self.auto_stop_btn = QPushButton("⏹ 停止")
-        self.auto_stop_btn.setFixedHeight(40)
-        self.auto_stop_btn.setEnabled(False)
-        self.auto_stop_btn.setStyleSheet("QPushButton { background-color: #dc2626; } QPushButton:disabled { background-color: #fca5a5; }")
-        self.auto_stop_btn.clicked.connect(self.stop_auto_timer)
-        auto_btn_row.addWidget(self.auto_run_once_btn)
-        auto_btn_row.addWidget(self.auto_start_btn)
-        auto_btn_row.addWidget(self.auto_stop_btn)
-        c4_layout.addLayout(auto_btn_row)
+        btn_row = QHBoxLayout()
+        self.add_task_btn = QPushButton("添加任务")
+        self.add_task_btn.setFixedHeight(35)
+        self.add_task_btn.clicked.connect(self.add_timer_task)
+        self.show_tasks_btn = QPushButton("查看任务")
+        self.show_tasks_btn.setFixedHeight(35)
+        self.show_tasks_btn.clicked.connect(self.show_timer_tasks)
+        btn_row.addWidget(self.add_task_btn)
+        btn_row.addWidget(self.show_tasks_btn)
+        c4_layout.addLayout(btn_row)
 
         card4.setLayout(c4_layout)
         cards.append(card4)
@@ -762,25 +538,20 @@ class WeChatSpiderUI(QMainWindow):
         self.login_btn.setEnabled(True)
         if success:
             self.login_status = True
-            # 保存登录凭证（包含 current_account 如果有）
-            if data and isinstance(data, dict):
-                self.current_account = data
             self.login_status_label.setText("当前状态：已登录 ✅")
             self.login_status_label.setStyleSheet("""
-                color: #10b981;
-                font-size: 14px;
+                color: #10b981; 
+                font-size: 14px; 
                 margin-top: 10px;
                 font-weight: 500;
             """)
             self.add_log_msg("系统", "🎉 微信登录成功，可进行公众号搜索/爬取操作")
-            # 立即保存登录凭证
-            self.save_user_config()
         else:
             self.login_status = False
             self.login_status_label.setText("当前状态：未登录 🚫")
             self.login_status_label.setStyleSheet("""
-                color: #ef4444;
-                font-size: 14px;
+                color: #ef4444; 
+                font-size: 14px; 
                 margin-top: 10px;
                 font-weight: 500;
             """)
@@ -920,8 +691,7 @@ class WeChatSpiderUI(QMainWindow):
             if data and isinstance(data, dict) and "articles" in data:
                 self._last_wechat_articles = data["articles"]
                 article_count = len(self._last_wechat_articles)
-                self._save_wechat_articles()
-                self.add_log_msg("系统", f"✅ 爬取完成：共 {article_count} 篇文章，已保存")
+                self.add_log_msg("系统", f"✅ 爬取完成：共 {article_count} 篇文章，已保存到内存")
             else:
                 if "已停止" in msg:
                     self.add_log_msg("系统", f"⚠️ {msg}")
@@ -1193,7 +963,7 @@ class WeChatSpiderUI(QMainWindow):
             self.dify_summarize_btn.setEnabled(True)
 
     def start_dify_upload(self):
-        """上传到 Dify 知识库（后台线程）"""
+        """上传到 Dify 知识库"""
         topic = self.dify_topic_input.text().strip()
 
         if not hasattr(self, '_last_summary') or not self._last_summary:
@@ -1203,205 +973,21 @@ class WeChatSpiderUI(QMainWindow):
         self.add_log_msg("用户", f"开始上传到 Dify 知识库，主题：{topic}")
         self.dify_upload_btn.setEnabled(False)
 
-        # 使用后台线程上传，避免阻塞 UI
-        self.upload_worker = UploadWorker(DIFY_DATASET_ID, self._last_summary, topic, self.dify_client)
-        self.upload_worker.upload_success.connect(self.on_upload_success)
-        self.upload_worker.upload_error.connect(self.on_upload_error)
-        self.upload_worker.start()
+        try:
+            name = f"{topic}_简报_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            success = self.dify_client.upload_document(
+                DIFY_DATASET_ID, self._last_summary, name
+            )
 
-    def on_upload_success(self):
-        """上传成功回调"""
-        self.dify_upload_btn.setEnabled(True)
-        self.add_log_msg("系统", "✅ 已成功上传到 Dify 知识库")
+            if success:
+                self.add_log_msg("系统", f"✅ 已成功上传到 Dify 知识库")
+            else:
+                self.add_log_msg("系统", "❌ 上传失败，请检查 Dify 配置")
 
-    def on_upload_error(self, msg):
-        """上传失败回调"""
-        self.dify_upload_btn.setEnabled(True)
-        self.add_log_msg("系统", f"❌ 上传失败：{msg}")
-
-    # ------------------------------
-    # 自动化任务功能
-    # ------------------------------
-    def build_auto_config(self):
-        """构建自动化任务配置"""
-        config = AutoTaskConfig()
-        config.wechat_enabled = self.wechat_check.isChecked()
-        config.weibo_enabled = self.weibo_check.isChecked()
-        config.rss_enabled = self.rss_check.isChecked()
-
-        # 获取公众号列表
-        accounts_text = self.wechat_accounts_edit.toPlainText().strip()
-        config.wechat_accounts = [a.strip() for a in accounts_text.split("\n") if a.strip()]
-
-        # 获取关键词
-        config.wechat_keywords = [k.strip() for k in self.wechat_keyword_edit.toPlainText().split("\n") if k.strip()]
-        config.weibo_keywords = [k.strip() for k in self.weibo_keyword_edit.toPlainText().split("\n") if k.strip()]
-        config.rss_keywords = [k.strip() for k in self.rss_keyword_edit.toPlainText().split("\n") if k.strip()]
-
-        # 日期范围
-        config.start_date = self.auto_start_date.date().toString("yyyy-MM-dd")
-        config.end_date = self.auto_end_date.date().toString("yyyy-MM-dd")
-
-        # PDF 和 Dify 配置
-        config.dify_upload_enabled = self.dify_upload_check.isChecked()
-        config.generate_pdf = self.auto_pdf_check.isChecked()
-
-        return config
-
-    def validate_auto_config(self, config):
-        """验证配置有效性"""
-        # 验证至少有一个渠道启用
-        if not config.wechat_enabled and not config.weibo_enabled and not config.rss_enabled:
-            self.add_log_msg("系统", "⚠️ 请至少选择一个采集渠道")
-            return False
-
-        # 验证启用的渠道有关键词或公众号
-        if config.wechat_enabled and not config.wechat_accounts and not config.wechat_keywords:
-            self.add_log_msg("系统", "⚠️ 微信渠道需要配置公众号或关键词")
-            return False
-        if config.weibo_enabled and not config.weibo_keywords:
-            self.add_log_msg("系统", "⚠️ 微博渠道需要配置关键词")
-            return False
-        if config.rss_enabled and not config.rss_keywords:
-            self.add_log_msg("系统", "⚠️ RSS 渠道需要配置关键词")
-            return False
-
-        # 验证日期范围
-        if self.auto_start_date.date() > self.auto_end_date.date():
-            self.add_log_msg("系统", "⚠️ 开始日期不能晚于结束日期")
-            return False
-
-        return True
-
-    def run_auto_once(self):
-        """手动执行一次自动化任务"""
-        if not self.login_status:
-            self.add_log_msg("系统", "⚠️ 操作失败：未登录微信")
-            QMessageBox.warning(self, "权限提示", "请先完成微信扫码登录！")
-            return
-
-        config = self.build_auto_config()
-        if not self.validate_auto_config(config):
-            return
-
-        # PDF 目录准备
-        if self.auto_pdf_check.isChecked():
-            os.makedirs(config.get_wechat_pdf_dir(), exist_ok=True)
-            os.makedirs(config.get_weibo_pdf_dir(), exist_ok=True)
-            os.makedirs(config.get_rss_pdf_dir(), exist_ok=True)
-
-        # 显示配置
-        self.add_log_msg("用户", f"""
-手动执行自动化任务:
-- 微信：{"启用" if config.wechat_enabled else "禁用"} {f"({len(config.wechat_accounts)} 个公众号)" if config.wechat_accounts else ""}
-- 微博：{"启用" if config.weibo_enabled else "禁用"}
-- RSS: {"启用" if config.rss_enabled else "禁用"}
-- 日期范围：{config.start_date} 至 {config.end_date}
-- 微信关键词：{len(config.wechat_keywords)} 个
-- 微博关键词：{len(config.weibo_keywords)} 个
-- RSS 关键词：{len(config.rss_keywords)} 个
-- 生成 PDF: {"是" if config.generate_pdf else "否"}
-- 上传 Dify: {"是" if config.dify_upload_enabled else "否"}
-        """)
-
-        self.auto_run_once_btn.setEnabled(False)
-        self.auto_start_btn.setEnabled(False)
-        self.auto_stop_btn.setEnabled(True)
-        self.auto_pbar.setValue(0)
-        self.auto_progress_percent.setText("0%")
-
-        self.auto_worker = AutoTaskWorker(
-            self.spider_runner,
-            self.weibo_runner,
-            self.rss_collector,
-            self.dify_client,
-            config
-        )
-        self.auto_worker.log_signal.connect(self.add_log_msg)
-        self.auto_worker.progress_signal.connect(self.update_auto_progress)
-        self.auto_worker.finish_signal.connect(self.on_auto_task_finished)
-        self.auto_worker.start()
-
-    def start_auto_timer(self):
-        """启动定时任务"""
-        if not self.login_status:
-            self.add_log_msg("系统", "⚠️ 操作失败：未登录微信")
-            QMessageBox.warning(self, "权限提示", "请先完成微信扫码登录！")
-            return
-
-        config = self.build_auto_config()
-        if not self.validate_auto_config(config):
-            return
-
-        if not self.timer_check.isChecked():
-            self.add_log_msg("系统", "⚠️ 请勾选'启用定时任务'")
-            return
-
-        # PDF 目录准备
-        if self.auto_pdf_check.isChecked():
-            os.makedirs(config.get_wechat_pdf_dir(), exist_ok=True)
-            os.makedirs(config.get_weibo_pdf_dir(), exist_ok=True)
-            os.makedirs(config.get_rss_pdf_dir(), exist_ok=True)
-
-        # 保存定时配置
-        self.timer_config = config
-        self.timer_interval = self.timer_freq_spin.value() * 3600 * 1000  # 小时转毫秒
-
-        self.add_log_msg("系统", f"✅ 定时任务已启动，每{self.timer_freq_spin.value()}小时执行一次")
-
-        # 启动定时器
-        self.auto_timer = QTimer()
-        self.auto_timer.timeout.connect(self.on_timer_timeout)
-        self.auto_timer.start(self.timer_interval)
-
-        # 更新 UI
-        self.auto_start_btn.setEnabled(False)
-        self.auto_stop_btn.setEnabled(True)
-        self.timer_check.setEnabled(False)
-        self.timer_freq_spin.setEnabled(False)
-
-        # 立即执行一次
-        self.run_auto_once()
-
-    def stop_auto_timer(self):
-        """停止定时任务"""
-        self.add_log_msg("系统", "🛑 正在停止定时任务...")
-
-        if hasattr(self, 'auto_timer') and self.auto_timer:
-            self.auto_timer.stop()
-
-        if self.auto_worker:
-            self.auto_worker.stop()
-
-        # 更新 UI
-        self.auto_start_btn.setEnabled(True)
-        self.auto_stop_btn.setEnabled(False)
-        self.auto_run_once_btn.setEnabled(True)
-        self.timer_check.setEnabled(True)
-        self.timer_freq_spin.setEnabled(True)
-
-        self.add_log_msg("系统", "✅ 定时任务已停止")
-
-    def on_timer_timeout(self):
-        """定时器触发"""
-        self.add_log_msg("系统", f"⏰ 定时任务触发，开始执行...")
-        self.run_auto_once()
-
-    def update_auto_progress(self, val):
-        """更新自动化任务进度"""
-        self.auto_pbar.setValue(val)
-        self.auto_progress_percent.setText(f"{val}%")
-
-    def on_auto_task_finished(self, success, msg):
-        """自动化任务完成回调"""
-        self.auto_run_once_btn.setEnabled(True)
-        self.auto_start_btn.setEnabled(True)
-        self.auto_stop_btn.setEnabled(False)
-
-        if success:
-            self.add_log_msg("系统", f"✅ {msg}")
-        else:
-            self.add_log_msg("系统", f"⚠️ {msg}")
+        except Exception as e:
+            self.add_log_msg("系统", f"❌ 上传失败：{e}")
+        finally:
+            self.dify_upload_btn.setEnabled(True)
 
     # ------------------------------
     # 样式设置
@@ -1498,10 +1084,7 @@ class WeChatSpiderUI(QMainWindow):
 
     def closeEvent(self, event):
         """窗口关闭事件 - 保存配置"""
-        try:
-            self.save_user_config()
-        except Exception as e:
-            print(f"保存配置失败：{e}")
+        self.save_user_config()
         event.accept()
 
 

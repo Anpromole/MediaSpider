@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "FileChanged": {
+      "pattern": "**/*.{py,md,txt,bat,json,html,css,js}",
+      "command": "echo '文件变更检测到，运行同步脚本...'; /home/anpromole/workspace/doge-code/MediaSpider/sync-to-windows.sh"
+    }
+  }
+}
