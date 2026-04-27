@@ -2,11 +2,16 @@ name: Build MediaSpider
 on:
   push:
     tags:
-      - 'v*' # 当你推送 v 开头的 tag 时自动触发打包
+      - 'v*'
 
 jobs:
   build:
-    runs-on: windows-latest # 指定在 Windows 环境下编译 .exe
+    runs-on: windows-latest
+    
+    # 【关键修复 1】：赋予 GitHub Actions 创建 Release 和上传文件的写权限
+    permissions:
+      contents: write 
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -14,9 +19,13 @@ jobs:
       - name: Build with PyAppify
         uses: ok-oldking/pyappify-action@v1
         with:
-          config: pyappify.yml # 指定配置文件
+          config: pyappify.yml
 
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
-          files: pyappify-release-*.zip # 具体的输出文件名可能需要根据 action 的日志调整
+          # 【关键修复 2】：扩大匹配范围。如果不知道确切名字，可以直接匹配所有生成的 zip 文件
+          # 如果之前作者的 action 输出在特定目录，你可能需要写成 release/*.zip 或类似的路径
+          files: |
+            *.zip 
+            */*.zip
