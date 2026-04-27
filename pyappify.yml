@@ -5,7 +5,7 @@ icon: "icons/icon.ico"
 
 profiles:
   - name: "release"
-    git_url: "https://github.com/Anpromole/MediaSpider.git"
+    git_url: "https://github.com/Anpromole/pyappify.git"
     main_script: "main.py"
     requires_python: "3.10"
     requirements: "requirements.txt"
