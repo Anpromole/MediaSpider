@@ -1,12 +1,16 @@
-name: "MediaSpider" # 应用程序名称
+# PyAppify 配置文件 - MediaSpider
+name: "MediaSpider"
+description: "道路塌陷爬虫系统 - 微信公众号、微博、RSS 采集和 AI 总结"
+icon: "icons/icon.ico"
+
 profiles:
   - name: "release"
     # MediaSpider 的 Git 仓库地址
-    git_url: "https://github.com/Anpromole/MediaSpider.git" 
+    git_url: "https://github.com/Anpromole/MediaSpider.git"
     # 入口文件
-    main_script: "main.py" 
+    main_script: "main.py"
     # Python 版本需求
-    requires_python: "3.10" 
+    requires_python: "3.10"
     # 依赖文件
     requirements: "requirements.txt"
     # 如果在国内使用，建议添加镜像源加速依赖安装
