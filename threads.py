@@ -217,12 +217,13 @@ class AutoTaskWorker(QThread):
                     else:
                         account_info = {"wpub_name": account[0], "wpub_fakid": account[1]}
 
-                    # 使用配置的日期范围
+                    # 使用配置的日期范围和爬取方式
                     start_date = getattr(self.config, 'start_date', None)
                     end_date = getattr(self.config, 'end_date', None)
+                    fetch_mode = getattr(self.config, 'wechat_fetch_mode', 'fast')
 
                     # 爬取
-                    update_progress(f"爬取公众号：{account_info['wpub_name']}")
+                    update_progress(f"爬取公众号：{account_info['wpub_name']} (模式：{fetch_mode})")
                     result = self.wechat_runner.scrape_single_account(
                         name=account_info['wpub_name'],
                         pages=self.config.pages_per_account,
@@ -232,6 +233,7 @@ class AutoTaskWorker(QThread):
                         generate_pdf=self.config.generate_pdf,
                         pdf_output_dir=self.config.get_wechat_pdf_dir(),
                         keywords=self.config.wechat_keywords,
+                        fetch_mode=fetch_mode,
                         progress_callback=lambda p, m: self.progress_signal.emit(int(current_step / total_steps * 100 + p / total_steps * 30))
                     )
 

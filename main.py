@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QPushButton, QLineEdit, QSpinBox, QDateEdit, QTextEdit,
     QListWidget, QListWidgetItem, QProgressBar, QGroupBox, QFileDialog,
-    QMessageBox, QFrame, QCheckBox
+    QMessageBox, QFrame, QCheckBox, QComboBox
 )
 from PyQt5.QtCore import (
     Qt, QDate, QDateTime, QEvent, QTimer
@@ -159,6 +159,7 @@ class WeChatSpiderUI(QMainWindow):
             try:
                 config['auto_start_date'] = self.auto_start_date.date().toString("yyyy-MM-dd")
                 config['auto_end_date'] = self.auto_end_date.date().toString("yyyy-MM-dd")
+                config['auto_fetch_mode'] = self.auto_fetch_mode.currentData()
                 config['auto_pdf'] = self.auto_pdf_check.isChecked()
                 config['dify_upload'] = self.dify_upload_check.isChecked()
                 print("[OK] auto date & checks")
@@ -230,6 +231,12 @@ class WeChatSpiderUI(QMainWindow):
                 self.auto_start_date.setDate(QDate.fromString(config['auto_start_date'], "yyyy-MM-dd"))
             if config.get('auto_end_date'):
                 self.auto_end_date.setDate(QDate.fromString(config['auto_end_date'], "yyyy-MM-dd"))
+            # 加载爬取方式
+            fetch_mode = config.get('auto_fetch_mode', 'fast')
+            for i in range(self.auto_fetch_mode.count()):
+                if self.auto_fetch_mode.itemData(i) == fetch_mode:
+                    self.auto_fetch_mode.setCurrentIndex(i)
+                    break
             self.auto_pdf_check.setChecked(config.get('auto_pdf', True))
             self.dify_upload_check.setChecked(config.get('dify_upload', True))
             self.timer_check.setChecked(config.get('timer_enabled', False))
@@ -561,6 +568,18 @@ class WeChatSpiderUI(QMainWindow):
         self.auto_end_date.setFixedHeight(32)
         date_row.addWidget(self.auto_end_date)
         c4_layout.addLayout(date_row)
+
+        # 爬取方式选择
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("爬取方式:"))
+        self.auto_fetch_mode = QComboBox()
+        self.auto_fetch_mode.addItem("快速模式 (偏移量)", "fast")
+        self.auto_fetch_mode.addItem("日期范围模式 (二分查找)", "date_range")
+        self.auto_fetch_mode.setCurrentIndex(0)
+        self.auto_fetch_mode.setFixedHeight(32)
+        mode_row.addWidget(self.auto_fetch_mode)
+        mode_row.addStretch()
+        c4_layout.addLayout(mode_row)
 
         # PDF 和 Dify 配置
         pdf_row = QHBoxLayout()
@@ -1241,6 +1260,9 @@ class WeChatSpiderUI(QMainWindow):
         # 日期范围
         config.start_date = self.auto_start_date.date().toString("yyyy-MM-dd")
         config.end_date = self.auto_end_date.date().toString("yyyy-MM-dd")
+
+        # 爬取方式
+        config.wechat_fetch_mode = self.auto_fetch_mode.currentData()
 
         # PDF 和 Dify 配置
         config.dify_upload_enabled = self.dify_upload_check.isChecked()

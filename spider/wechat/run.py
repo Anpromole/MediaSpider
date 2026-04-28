@@ -210,7 +210,7 @@ class WeChatSpiderRunner:
             self, name, pages=10, start_date=None, end_date=None, include_content=False,
             interval=10, output_file=None, use_db=False, db_type="sqlite",
             generate_pdf=False, pdf_output_dir=None,
-            progress_callback=None, keywords=None
+            progress_callback=None, keywords=None, fetch_mode='fast'
     ):
         """
         爬取单个公众号（支持中断）
@@ -241,27 +241,16 @@ class WeChatSpiderRunner:
 
         scraper.set_callback('progress', page_progress_callback)
 
-        # 获取文章列表
-        articles = scraper.get_account_articles(
+        # 获取文章列表：根据 fetch_mode 选择爬取方式
+        articles = scraper.get_account_articles_by_mode(
             account['wpub_name'],
             account['wpub_fakid'],
-            pages
+            max_pages=pages,
+            fetch_mode=fetch_mode,
+            start_date=start_date,
+            end_date=end_date
         )
-
-        # 1. 按日期过滤
-        filtered_articles = []
-        if start_date and end_date:
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
-            for article in articles:
-                try:
-                    publish_date = datetime.fromtimestamp(article.get('publish_timestamp', 0)).date()
-                    if start_dt <= publish_date <= end_dt:
-                        filtered_articles.append(article)
-                except:
-                    pass
-        else:
-            filtered_articles = articles
+        filtered_articles = articles
 
         # 2. 按关键词筛选
         if keywords:
@@ -366,13 +355,17 @@ class WeChatSpiderRunner:
     def batch_scrape(
             self, accounts, pages=10, start_date=None, end_date=None, include_content=False,
             interval=10, threads=3, output_dir=None, use_db=False, db_type="sqlite",
-            generate_pdf=False, pdf_output_dir=None, progress_callback=None, keywords=None
+            generate_pdf=False, pdf_output_dir=None, progress_callback=None, keywords=None,
+            fetch_mode='fast'
     ):
         """
         批量爬取多个公众号（支持中断）
+
+        Args:
+            fetch_mode: 爬取模式 ('fast' 快速偏移量 或 'date_range' 日期范围二分查找)
         """
         self.reset_stop()
-        logger.info(f"批量爬取公众号，共 {len(accounts)} 个账号")
+        logger.info(f"批量爬取公众号，共 {len(accounts)} 个账号 (模式：{fetch_mode})")
         keywords = keywords or []
 
         if not self.login_manager.is_logged_in():
@@ -412,7 +405,8 @@ class WeChatSpiderRunner:
             'use_threading': threads > 1,
             'max_workers': threads,
             'include_content': include_content,
-            'output_file': os.path.join(output_dir, f"wechat_articles_{int(time.time())}.csv")
+            'output_file': os.path.join(output_dir, f"wechat_articles_{int(time.time())}.csv"),
+            'fetch_mode': fetch_mode  # 新增：传递爬取模式
         }
 
         # 第一阶段：获取文章列表（通常较快，暂不支持细粒度中断）

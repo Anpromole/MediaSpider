@@ -58,6 +58,13 @@ class AutoTaskConfig:
         self.pages_per_account = 5
         self.date_range_days = 7
 
+        # 爬取方式：'fast' (快速偏移量) 或 'date_range' (日期范围二分查找)
+        self.wechat_fetch_mode = 'fast'  # 'fast' | 'date_range'
+
+        # 日期范围配置（自动化任务）
+        self.start_date = None
+        self.end_date = None
+
     def get_wechat_pdf_dir(self):
         return os.path.join(self.pdf_base_dir, self.wechat_pdf_subdir)
 
@@ -80,6 +87,9 @@ class AutoTaskConfig:
             "dify_upload_enabled": self.dify_upload_enabled,
             "pages_per_account": self.pages_per_account,
             "date_range_days": self.date_range_days,
+            "wechat_fetch_mode": self.wechat_fetch_mode,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
         }
 
     @classmethod
@@ -96,4 +106,7 @@ class AutoTaskConfig:
         config.dify_upload_enabled = data.get("dify_upload_enabled", True)
         config.pages_per_account = data.get("pages_per_account", 5)
         config.date_range_days = data.get("date_range_days", 7)
+        config.wechat_fetch_mode = data.get("wechat_fetch_mode", "fast")
+        config.start_date = data.get("start_date")
+        config.end_date = data.get("end_date")
         return config
