@@ -8,22 +8,39 @@ from config import AutoTaskConfig
 
 def install_playwright_browser(log_callback=None):
     """安装/更新 playwright 浏览器组件"""
-    try:
+    import subprocess
+    
+    def log(msg):
         if log_callback:
-            log_callback("系统", "正在检查并更新浏览器组件...")
-        subprocess.check_call(
+            log_callback("系统", msg)
+    
+    try:
+        log("正在检查并更新浏览器组件...")
+        # 使用 shell=True 并重定向输出以显示进度
+        process = subprocess.Popen(
             [sys.executable, "-m", "playwright", "install", "chromium", "--force"],
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
         )
-        if log_callback:
-            log_callback("系统", "✅ 浏览器组件更新完成")
+        
+        # 实时输出安装进度
+        for line in iter(process.stdout.readline, ''):
+            if line.strip():
+                log(line.strip())
+        
+        process.wait()
+        
+        if process.returncode == 0:
+            log("✅ 浏览器组件更新完成")
             return True
+        else:
+            log("❌ 浏览器安装失败")
+            return False
+            
     except Exception as e:
-        err_msg = f"❌ 浏览器安装失败：{str(e)}"
-        if log_callback:
-            log_callback("系统", err_msg)
+        log(f"❌ 浏览器安装异常：{str(e)}")
         return False
 
 
