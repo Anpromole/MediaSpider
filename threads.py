@@ -7,18 +7,18 @@ from config import AutoTaskConfig
 
 
 def install_playwright_browser(log_callback=None):
-    """安装playwright浏览器组件"""
+    """安装/更新 playwright 浏览器组件"""
     try:
         if log_callback:
-            log_callback("系统", "正在检查并安装浏览器组件...")
+            log_callback("系统", "正在检查并更新浏览器组件...")
         subprocess.check_call(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
+            [sys.executable, "-m", "playwright", "install", "chromium", "--force"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
         if log_callback:
-            log_callback("系统", "✅ 浏览器组件就绪")
+            log_callback("系统", "✅ 浏览器组件更新完成")
             return True
     except Exception as e:
         err_msg = f"❌ 浏览器安装失败：{str(e)}"
