@@ -1,9 +1,39 @@
 import sys
 import os
 import subprocess
+import glob
 from datetime import datetime
 from PyQt5.QtCore import pyqtSignal, QThread
 from config import AutoTaskConfig
+
+# 全局设置 Playwright 国内镜像源以加快下载并提高成功率
+os.environ["PLAYWRIGHT_DOWNLOAD_HOST"] = "https://npmmirror.com/mirrors/playwright/"
+
+
+def is_playwright_installed():
+    """快速检测 Playwright 浏览器是否已完整安装"""
+    # 查找默认的 ms-playwright 路径
+    browsers_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if not browsers_path:
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            browsers_path = os.path.join(local_app_data, "ms-playwright")
+        else:
+            user_profile = os.environ.get("USERPROFILE")
+            if user_profile:
+                browsers_path = os.path.join(user_profile, "AppData", "Local", "ms-playwright")
+                
+    if not browsers_path or not os.path.exists(browsers_path):
+        return False
+        
+    # Playwright 默认会下载：
+    # 1. chromium_headless_shell-* (用于 headless)
+    # 2. chromium-* (用于 headed)
+    # 只要存在这二者之一的 chrome 可执行程序即视为已安装
+    headless_shells = glob.glob(os.path.join(browsers_path, "chromium_headless_shell-*", "**", "chrome-headless-shell.exe"), recursive=True)
+    chromiums = glob.glob(os.path.join(browsers_path, "chromium-*", "**", "chrome.exe"), recursive=True)
+    
+    return len(headless_shells) > 0 or len(chromiums) > 0
 
 
 def install_playwright_browser(log_callback=None):
@@ -16,13 +46,20 @@ def install_playwright_browser(log_callback=None):
     
     try:
         log("正在检查并更新浏览器组件...")
+        
+        # 传递包含下载镜像源的系统环境变量
+        import os
+        env = os.environ.copy()
+        env["PLAYWRIGHT_DOWNLOAD_HOST"] = "https://npmmirror.com/mirrors/playwright/"
+        
         # 使用 shell=True 并重定向输出以显示进度
         process = subprocess.Popen(
             [sys.executable, "-m", "playwright", "install", "chromium", "--force"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=1,
+            env=env
         )
         
         # 实时输出安装进度

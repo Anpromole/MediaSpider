@@ -31,7 +31,7 @@ from spider.weibo.run import WeiboSpiderRunner
 from spider.rss.collector import RSSCollector
 from spider.dify.client import DifyClient
 from spider.dify.summarizer import NewsSummarizer
-from threads import BrowserInstaller, SpiderWorker, UploadWorker, AutoTaskWorker
+from threads import BrowserInstaller, SpiderWorker, UploadWorker, AutoTaskWorker, is_playwright_installed
 from config import AutoTaskConfig
 from widgets import ChatBubble
 from config import (
@@ -860,6 +860,15 @@ class WeChatSpiderUI(QMainWindow):
 
     def start_scrape(self):
         """启动爬取任务"""
+        if not is_playwright_installed():
+            self.add_log_msg("系统", "⚠️ 无法启动爬取任务：Playwright 浏览器组件未完整安装！")
+            self.add_log_msg("系统", "📢 正在为您在后台自动下载安装浏览器组件，这可能需要几分钟，请留意日志输出并在完成后重试。")
+            QMessageBox.warning(self, "浏览器组件未就绪", "Playwright 浏览器组件未完整安装，已启动后台自动下载，请稍后再试！")
+            if not self.installer_thread.isRunning():
+                self.add_log_msg("系统", "🔄 正在尝试重新启动浏览器安装程序...")
+                self.installer_thread.start()
+            return
+
         if not self.login_status:
             self.add_log_msg("系统", "⚠️ 操作失败：未登录微信")
             QMessageBox.warning(self, "权限提示", "请先完成微信扫码登录，再进行文章爬取！")
@@ -1297,6 +1306,14 @@ class WeChatSpiderUI(QMainWindow):
 
     def run_auto_once(self):
         """手动执行一次自动化任务"""
+        if not is_playwright_installed():
+            self.add_log_msg("系统", "⚠️ 无法启动自动化任务：Playwright 浏览器组件未完整安装！")
+            QMessageBox.warning(self, "浏览器组件未就绪", "Playwright 浏览器组件未完整安装，已启动后台自动下载，请稍后再试！")
+            if not self.installer_thread.isRunning():
+                self.add_log_msg("系统", "🔄 正在尝试重新启动浏览器安装程序...")
+                self.installer_thread.start()
+            return
+
         if not self.login_status:
             self.add_log_msg("系统", "⚠️ 操作失败：未登录微信")
             QMessageBox.warning(self, "权限提示", "请先完成微信扫码登录！")
@@ -1346,6 +1363,14 @@ class WeChatSpiderUI(QMainWindow):
 
     def start_auto_timer(self):
         """启动定时任务"""
+        if not is_playwright_installed():
+            self.add_log_msg("系统", "⚠️ 无法启动定时任务：Playwright 浏览器组件未完整安装！")
+            QMessageBox.warning(self, "浏览器组件未就绪", "Playwright 浏览器组件未完整安装，已启动后台自动下载，请稍后再试！")
+            if not self.installer_thread.isRunning():
+                self.add_log_msg("系统", "🔄 正在尝试重新启动浏览器安装程序...")
+                self.installer_thread.start()
+            return
+
         if not self.login_status:
             self.add_log_msg("系统", "⚠️ 操作失败：未登录微信")
             QMessageBox.warning(self, "权限提示", "请先完成微信扫码登录！")
