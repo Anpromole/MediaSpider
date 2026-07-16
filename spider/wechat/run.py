@@ -127,7 +127,7 @@ class WeChatSpiderRunner:
 
                 page.goto(
                     article_url,
-                    wait_until='load',
+                    wait_until='domcontentloaded',
                     timeout=120000
                 )
 
