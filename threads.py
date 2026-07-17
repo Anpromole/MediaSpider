@@ -6,8 +6,6 @@ from datetime import datetime
 from PyQt5.QtCore import pyqtSignal, QThread
 from config import AutoTaskConfig
 
-# 全局设置 Playwright 国内镜像源以加快下载并提高成功率
-os.environ["PLAYWRIGHT_DOWNLOAD_HOST"] = "https://npmmirror.com/mirrors/playwright/"
 
 
 def is_playwright_installed():
@@ -47,10 +45,8 @@ def install_playwright_browser(log_callback=None):
     try:
         log("正在检查并更新浏览器组件...")
         
-        # 传递包含下载镜像源的系统环境变量
         import os
         env = os.environ.copy()
-        env["PLAYWRIGHT_DOWNLOAD_HOST"] = "https://npmmirror.com/mirrors/playwright/"
         
         # 使用 shell=True 并重定向输出以显示进度
         process = subprocess.Popen(
