@@ -247,11 +247,17 @@ class WeChatSpiderRunner:
 
         scraper.set_callback('progress', page_progress_callback)
 
+        # 如果是按日期范围二分查找模式，自动把最大页数拓展至 500~2000 页，避免历史长跨度抓取被截断
+        effective_max_pages = pages
+        if fetch_mode == 'date_range':
+            if pages < 500:
+                effective_max_pages = 1000  # 支持约 5000 篇文章的深度历史二分检索
+
         # 获取文章列表：根据 fetch_mode 选择爬取方式
         articles = scraper.get_account_articles_by_mode(
             account['wpub_name'],
             account['wpub_fakid'],
-            max_pages=pages,
+            max_pages=effective_max_pages,
             fetch_mode=fetch_mode,
             start_date=start_date,
             end_date=end_date

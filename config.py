@@ -52,8 +52,9 @@ class AutoTaskConfig:
         self.pages_per_account = 5
         self.date_range_days = 7
 
-        # 爬取方式：'fast' (快速偏移量) 或 'date_range' (日期范围二分查找)
+        # 爬取方式与时间跨度配置
         self.wechat_fetch_mode = 'fast'  # 'fast' | 'date_range'
+        self.time_span = 'fast_recent'  # 'fast_recent' | '1_month' | '6_months' | '1_year' | '3_years' | 'all_history' | 'custom'
 
         # 日期范围配置（自动化任务）
         self.start_date = None
@@ -73,6 +74,7 @@ class AutoTaskConfig:
             "pages_per_account": self.pages_per_account,
             "date_range_days": self.date_range_days,
             "wechat_fetch_mode": self.wechat_fetch_mode,
+            "time_span": self.time_span,
             "start_date": self.start_date,
             "end_date": self.end_date,
         }
@@ -89,6 +91,7 @@ class AutoTaskConfig:
         config.pages_per_account = data.get("pages_per_account", 5)
         config.date_range_days = data.get("date_range_days", 7)
         config.wechat_fetch_mode = data.get("wechat_fetch_mode", "fast")
+        config.time_span = data.get("time_span", "fast_recent")
         config.start_date = data.get("start_date")
         config.end_date = data.get("end_date")
         return config

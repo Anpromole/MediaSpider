@@ -116,6 +116,7 @@ class WeChatSpiderUI(QMainWindow):
             config['auto_start_date'] = self.auto_start_date.date().toString("yyyy-MM-dd")
             config['auto_end_date'] = self.auto_end_date.date().toString("yyyy-MM-dd")
             config['auto_fetch_mode'] = self.auto_fetch_mode.currentData()
+            config['time_span'] = self.time_span_combo.currentData()
             config['auto_pdf'] = self.auto_pdf_check.isChecked()
             config['dify_upload'] = self.dify_upload_check.isChecked()
             config['timer_enabled'] = self.timer_check.isChecked()
@@ -155,6 +156,12 @@ class WeChatSpiderUI(QMainWindow):
             for i in range(self.auto_fetch_mode.count()):
                 if self.auto_fetch_mode.itemData(i) == fetch_mode:
                     self.auto_fetch_mode.setCurrentIndex(i)
+                    break
+
+            time_span = config.get('time_span', 'fast_recent')
+            for i in range(self.time_span_combo.count()):
+                if self.time_span_combo.itemData(i) == time_span:
+                    self.time_span_combo.setCurrentIndex(i)
                     break
 
             self.auto_pdf_check.setChecked(config.get('auto_pdf', True))
@@ -341,6 +348,23 @@ class WeChatSpiderUI(QMainWindow):
         self.wechat_keyword_edit.setPlaceholderText("道路塌陷\n燃气泄漏\n路面坍塌")
         self.wechat_keyword_edit.setMaximumHeight(60)
         c2_layout.addWidget(self.wechat_keyword_edit)
+
+        # 时间跨度快捷预设
+        span_row = QHBoxLayout()
+        span_row.addWidget(QLabel("时间跨度:"))
+        self.time_span_combo = QComboBox()
+        self.time_span_combo.addItem("⚡ 最新 10 页文章 (快速模式)", "fast_recent")
+        self.time_span_combo.addItem("🕒 最近 1 个月", "1_month")
+        self.time_span_combo.addItem("🕒 最近 6 个月", "6_months")
+        self.time_span_combo.addItem("📅 最近 1 年 (推荐)", "1_year")
+        self.time_span_combo.addItem("📅 最近 3 年", "3_years")
+        self.time_span_combo.addItem("🏛️ 全部历史文章 (历年以来)", "all_history")
+        self.time_span_combo.addItem("⚙️ 自定义日期范围", "custom")
+        self.time_span_combo.setCurrentIndex(0)
+        self.time_span_combo.setFixedHeight(32)
+        self.time_span_combo.currentIndexChanged.connect(self.on_time_span_changed)
+        span_row.addWidget(self.time_span_combo)
+        c2_layout.addLayout(span_row)
 
         # 日期范围配置
         date_row = QHBoxLayout()
@@ -613,6 +637,49 @@ class WeChatSpiderUI(QMainWindow):
         self.dify_upload_btn.setEnabled(True)
         self.add_log_msg("系统", f"❌ 上传失败：{msg}")
 
+    def on_time_span_changed(self, index):
+        """时间跨度选择切换事件回调"""
+        key = self.time_span_combo.itemData(index)
+        today = QDate.currentDate()
+        self.auto_end_date.setDate(today)
+
+        if key == "fast_recent":
+            self.auto_start_date.setDate(today)
+            for i in range(self.auto_fetch_mode.count()):
+                if self.auto_fetch_mode.itemData(i) == "fast":
+                    self.auto_fetch_mode.setCurrentIndex(i)
+                    break
+        elif key == "1_month":
+            self.auto_start_date.setDate(today.addDays(-30))
+            for i in range(self.auto_fetch_mode.count()):
+                if self.auto_fetch_mode.itemData(i) == "date_range":
+                    self.auto_fetch_mode.setCurrentIndex(i)
+                    break
+        elif key == "6_months":
+            self.auto_start_date.setDate(today.addDays(-180))
+            for i in range(self.auto_fetch_mode.count()):
+                if self.auto_fetch_mode.itemData(i) == "date_range":
+                    self.auto_fetch_mode.setCurrentIndex(i)
+                    break
+        elif key == "1_year":
+            self.auto_start_date.setDate(today.addDays(-365))
+            for i in range(self.auto_fetch_mode.count()):
+                if self.auto_fetch_mode.itemData(i) == "date_range":
+                    self.auto_fetch_mode.setCurrentIndex(i)
+                    break
+        elif key == "3_years":
+            self.auto_start_date.setDate(today.addDays(-1095))
+            for i in range(self.auto_fetch_mode.count()):
+                if self.auto_fetch_mode.itemData(i) == "date_range":
+                    self.auto_fetch_mode.setCurrentIndex(i)
+                    break
+        elif key == "all_history":
+            self.auto_start_date.setDate(QDate(2012, 1, 1))
+            for i in range(self.auto_fetch_mode.count()):
+                if self.auto_fetch_mode.itemData(i) == "date_range":
+                    self.auto_fetch_mode.setCurrentIndex(i)
+                    break
+
     # ------------------------------
     # 自动化任务与持续监听逻辑
     # ------------------------------
@@ -628,6 +695,7 @@ class WeChatSpiderUI(QMainWindow):
         config.start_date = self.auto_start_date.date().toString("yyyy-MM-dd")
         config.end_date = self.auto_end_date.date().toString("yyyy-MM-dd")
         config.wechat_fetch_mode = self.auto_fetch_mode.currentData()
+        config.time_span = self.time_span_combo.currentData()
         config.pdf_base_dir = self.pdf_dir
         config.generate_pdf = self.auto_pdf_check.isChecked()
         config.dify_upload_enabled = self.dify_upload_check.isChecked()
