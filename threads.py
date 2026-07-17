@@ -209,7 +209,7 @@ class UploadWorker(QThread):
 
 
 class AutoTaskWorker(QThread):
-    """自动化任务工作线程 - 执行多渠道爬取 + PDF 生成 + Dify 上传"""
+    """自动化任务工作线程 - 执行微信抓取 + PDF 生成 + Dify 上传"""
     log_signal = pyqtSignal(str, str)
     progress_signal = pyqtSignal(int)
     finish_signal = pyqtSignal(bool, str)
@@ -230,12 +230,8 @@ class AutoTaskWorker(QThread):
     def run(self):
         try:
             total_steps = 0
-            if self.config.wechat_enabled:
-                total_steps += len(self.config.wechat_accounts) * 2  # 爬取+PDF
-            if self.config.weibo_enabled:
-                total_steps += 2  # 爬取+PDF
-            if self.config.rss_enabled:
-                total_steps += 2  # 爬取+PDF
+            if self.config.wechat_enabled and self.config.wechat_accounts:
+                total_steps += len(self.config.wechat_accounts)
             if self.config.dify_upload_enabled:
                 total_steps += 1  # 上传
 
@@ -257,7 +253,6 @@ class AutoTaskWorker(QThread):
 
                     # 解析账号（可能是字符串或 (名称，fakeid) 元组）
                     if isinstance(account, str):
-                        # 需要搜索获取 fakeid
                         update_progress(f"搜索公众号：{account}")
                         search_results = self.wechat_runner.search_account(account)
                         if not search_results:
@@ -267,12 +262,10 @@ class AutoTaskWorker(QThread):
                     else:
                         account_info = {"wpub_name": account[0], "wpub_fakid": account[1]}
 
-                    # 使用配置的日期范围和爬取方式
                     start_date = getattr(self.config, 'start_date', None)
                     end_date = getattr(self.config, 'end_date', None)
                     fetch_mode = getattr(self.config, 'wechat_fetch_mode', 'fast')
 
-                    # 爬取
                     update_progress(f"爬取公众号：{account_info['wpub_name']} (模式：{fetch_mode})")
                     result = self.wechat_runner.scrape_single_account(
                         name=account_info['wpub_name'],
@@ -284,7 +277,7 @@ class AutoTaskWorker(QThread):
                         pdf_output_dir=self.config.get_wechat_pdf_dir(),
                         keywords=self.config.wechat_keywords,
                         fetch_mode=fetch_mode,
-                        progress_callback=lambda p, m: self.progress_signal.emit(int(current_step / total_steps * 100 + p / total_steps * 30))
+                        progress_callback=lambda p, m: self.progress_signal.emit(int(current_step / max(total_steps, 1) * 100 + p / max(total_steps, 1) * 30))
                     )
 
                     if result.get("success") and "articles" in result.get("data", {}):
@@ -292,51 +285,6 @@ class AutoTaskWorker(QThread):
                         pdf_files = [a.get("pdf_path") for a in articles if a.get("pdf_path")]
                         all_pdf_files.extend(pdf_files)
                         update_progress(f"微信爬取完成：{len(pdf_files)} 个 PDF")
-
-                    current_step += 1
-
-            # ==================== 微博爬取 ====================
-            if self.config.weibo_enabled and self.config.weibo_keywords:
-                update_progress("开始微博爬取...")
-
-                for keyword in self.config.weibo_keywords:
-                    if self.stop_flag:
-                        break
-
-                    weibos = self.weibo_runner.search_keyword(
-                        keyword=keyword,
-                        pages=5,
-                        progress_callback=lambda c, t, m: self.log_signal.emit("系统", f"微博：{m}")
-                    )
-
-                    if weibos:
-                        # 保存为 CSV
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        filename = f"weibo_{keyword}_{timestamp}.csv"
-                        self.weibo_runner.save_to_csv(weibos, filename)
-                        update_progress(f"微博爬取完成：{len(weibos)} 条")
-
-                    current_step += 1
-
-            # ==================== RSS 采集 ====================
-            if self.config.rss_enabled and self.config.rss_keywords:
-                update_progress("开始 RSS 采集...")
-
-                for keyword in self.config.rss_keywords:
-                    if self.stop_flag:
-                        break
-
-                    news_list = self.rss_collector.fetch(
-                        keyword=keyword,
-                        pages=50,
-                        progress_callback=lambda c, t, m: self.log_signal.emit("系统", f"RSS: {m}")
-                    )
-
-                    if news_list:
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        filename = f"rss_{keyword}_{timestamp}.csv"
-                        self.rss_collector.save_to_csv(news_list, filename)
-                        update_progress(f"RSS 采集完成：{len(news_list)} 条")
 
                     current_step += 1
 
@@ -368,4 +316,6 @@ class AutoTaskWorker(QThread):
                 self.finish_signal.emit(True, f"自动化任务完成，共生成 {len(all_pdf_files)} 个 PDF")
 
         except Exception as e:
+            self.finish_signal.emit(False, f"执行出错：{str(e)}")
+
             self.finish_signal.emit(False, f"执行出错：{str(e)}")

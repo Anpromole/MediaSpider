@@ -30,24 +30,18 @@ DEFAULT_WEIBO_KEYWORD = "道路塌陷"
 class AutoTaskConfig:
     """自动化任务配置类"""
     def __init__(self):
-        # 渠道开关
+        # 微信公众号开启
         self.wechat_enabled = True
-        self.weibo_enabled = True
-        self.rss_enabled = True
 
         # 微信公众号列表（假如有 fakeid 则用元组 (名称，fakeid)）
         self.wechat_accounts = []
 
-        # 各渠道关键词（列表，满足任一即爬取）
+        # 微信关键词（列表，满足任一即爬取）
         self.wechat_keywords = []
-        self.weibo_keywords = []
-        self.rss_keywords = []
 
         # PDF 保存配置
-        self.pdf_base_dir = "./auto_pdf"
-        self.wechat_pdf_subdir = "wechat"
-        self.weibo_pdf_subdir = "weibo"
-        self.rss_pdf_subdir = "rss"
+        self.pdf_base_dir = "./wechat_pdf"
+        self.generate_pdf = True
 
         # Dify 上传配置
         self.dify_upload_enabled = True
@@ -66,24 +60,15 @@ class AutoTaskConfig:
         self.end_date = None
 
     def get_wechat_pdf_dir(self):
-        return os.path.join(self.pdf_base_dir, self.wechat_pdf_subdir)
-
-    def get_weibo_pdf_dir(self):
-        return os.path.join(self.pdf_base_dir, self.weibo_pdf_subdir)
-
-    def get_rss_pdf_dir(self):
-        return os.path.join(self.pdf_base_dir, self.rss_pdf_subdir)
+        return self.pdf_base_dir
 
     def to_dict(self):
         return {
             "wechat_enabled": self.wechat_enabled,
-            "weibo_enabled": self.weibo_enabled,
-            "rss_enabled": self.rss_enabled,
             "wechat_accounts": self.wechat_accounts,
             "wechat_keywords": self.wechat_keywords,
-            "weibo_keywords": self.weibo_keywords,
-            "rss_keywords": self.rss_keywords,
             "pdf_base_dir": self.pdf_base_dir,
+            "generate_pdf": self.generate_pdf,
             "dify_upload_enabled": self.dify_upload_enabled,
             "pages_per_account": self.pages_per_account,
             "date_range_days": self.date_range_days,
@@ -96,17 +81,14 @@ class AutoTaskConfig:
     def from_dict(cls, data):
         config = cls()
         config.wechat_enabled = data.get("wechat_enabled", True)
-        config.weibo_enabled = data.get("weibo_enabled", True)
-        config.rss_enabled = data.get("rss_enabled", True)
         config.wechat_accounts = data.get("wechat_accounts", [])
         config.wechat_keywords = data.get("wechat_keywords", [])
-        config.weibo_keywords = data.get("weibo_keywords", [])
-        config.rss_keywords = data.get("rss_keywords", [])
-        config.pdf_base_dir = data.get("pdf_base_dir", "./auto_pdf")
+        config.pdf_base_dir = data.get("pdf_base_dir", "./wechat_pdf")
+        config.generate_pdf = data.get("generate_pdf", True)
         config.dify_upload_enabled = data.get("dify_upload_enabled", True)
         config.pages_per_account = data.get("pages_per_account", 5)
         config.date_range_days = data.get("date_range_days", 7)
         config.wechat_fetch_mode = data.get("wechat_fetch_mode", "fast")
         config.start_date = data.get("start_date")
         config.end_date = data.get("end_date")
-        return config
+        return config
