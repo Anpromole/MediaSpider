@@ -220,3 +220,6 @@ __marimo__/
 .config/
 *.db
 *.sqlite
+wechat_cache.json
+wechat_accounts.json
+

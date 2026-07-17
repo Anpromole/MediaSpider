@@ -77,7 +77,15 @@ class WeChatSpiderLogin:
                 logger.info(f"[DEBUG] 准备写入缓存文件：{self.cache_file}")
                 with open(self.cache_file, 'w', encoding='utf-8') as f:
                     json.dump(cache_data, f, ensure_ascii=False, indent=2)
-                logger.success(f"登录信息已保存到缓存文件 {self.cache_file}")
+                
+                # 同步导入注册到多账号池
+                try:
+                    from spider.wechat.account_pool import account_pool
+                    account_pool.add_account(self.token, self.cookies)
+                except Exception as pool_err:
+                    logger.warning(f"注册登录凭证到账号池失败: {pool_err}")
+
+                logger.success(f"登录信息已保存到缓存文件 {self.cache_file} 并同步注册到账号池。")
                 return True
             except Exception as e:
                 logger.error(f"保存缓存失败：{e}")

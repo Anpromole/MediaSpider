@@ -32,13 +32,16 @@ import threading
 from datetime import datetime, date, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# 导入日志模块
+# 导入日志与账号池模块
 from spider.log.utils import logger
 from spider.wechat.utils import (
     get_fakid, get_articles_list, get_article_content, format_time,
-    get_articles_by_date_range, get_articles_by_offset
+    get_articles_by_date_range, get_articles_by_offset,
+    WeChatRateLimitError, WeChatTokenExpiredError
 )
-from spider.wechat.config import REQUEST_DELAY, DEFAULT_FETCH_MODE
+from spider.wechat.config import REQUEST_DELAY, DEFAULT_FETCH_MODE, BATCH_INTER_ACCOUNT_DELAY
+from spider.wechat.account_pool import account_pool
+
 
 
 class WeChatScraper:
@@ -90,9 +93,44 @@ class WeChatScraper:
         if event_type in self.callbacks:
             self.callbacks[event_type] = callback_func
 
+    def _ensure_credentials(self):
+        """确保具备有效凭证，若缺失则自动从账号池载入"""
+        if not self.token or not self.headers:
+            active_acc = account_pool.get_active_account()
+            if active_acc:
+                self.token = active_acc.token
+                cookie_str = active_acc.cookies if isinstance(active_acc.cookies, str) else "; ".join([f"{k}={v}" for k, v in active_acc.cookies.items()])
+                self.headers = {
+                    "HOST": "mp.weixin.qq.com",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
+                    "Cookie": cookie_str
+                }
+                logger.info(f"🔑 自动从账号池加载凭证: [{active_acc.name}]")
+
+    def _rotate_on_error(self, error_type, token=None):
+        """当捕获频次限制或凭证失效时，触发自动切号"""
+        tok = token or self.token
+        if error_type == "rate_limit":
+            account_pool.mark_rate_limited(tok)
+        elif error_type == "expired":
+            account_pool.mark_expired(tok)
+
+        next_acc = account_pool.rotate(tok)
+        if next_acc:
+            self.token = next_acc.token
+            cookie_str = next_acc.cookies if isinstance(next_acc.cookies, str) else "; ".join([f"{k}={v}" for k, v in next_acc.cookies.items()])
+            self.headers = {
+                "HOST": "mp.weixin.qq.com",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
+                "Cookie": cookie_str
+            }
+            logger.info(f"🔄 自动切号完成，已无缝切换为 [{next_acc.name}] 继续执行任务。")
+            return True
+        return False
+
     def search_account(self, query):
         """
-        搜索公众号
+        搜索公众号（带自动切号重试）
 
         Args:
             query: 公众号名称关键词
@@ -100,19 +138,33 @@ class WeChatScraper:
         Returns:
             list: 匹配的公众号列表
         """
-        if not self.token or not self.headers:
-            self._trigger_error("未设置 token 或 headers")
-            return []
+        self._ensure_credentials()
+        max_attempts = max(1, len(account_pool.accounts))
 
-        try:
-            return get_fakid(self.headers, self.token, query)
-        except Exception as e:
-            self._trigger_error(f"搜索公众号失败：{e}")
-            return []
+        for attempt in range(max_attempts):
+            if not self.token or not self.headers:
+                self._trigger_error("未设置 token 或 headers")
+                return []
+
+            try:
+                return get_fakid(self.headers, self.token, query)
+            except WeChatRateLimitError:
+                logger.warning(f"搜索公众号时触发频次限制 (Token: {self.token[:8]}...)")
+                if not self._rotate_on_error("rate_limit", self.token):
+                    break
+            except WeChatTokenExpiredError:
+                logger.warning(f"搜索公众号时凭证失效 (Token: {self.token[:8]}...)")
+                if not self._rotate_on_error("expired", self.token):
+                    break
+            except Exception as e:
+                self._trigger_error(f"搜索公众号失败：{e}")
+                return []
+
+        return []
 
     def get_account_articles(self, account_name, fakeid=None, max_pages=10):
         """
-        获取公众号文章列表
+        获取公众号文章列表（带自动切号重试）
 
         Args:
             account_name: 公众号名称
@@ -122,6 +174,7 @@ class WeChatScraper:
         Returns:
             list: 文章信息列表
         """
+        self._ensure_credentials()
         if not self.token or not self.headers:
             self._trigger_error("未设置 token 或 headers")
             return []
@@ -144,18 +197,30 @@ class WeChatScraper:
             for page in range(max_pages):
                 self._trigger_progress(page, max_pages)
 
-                # 获取一页文章
-                titles, links, update_times = get_articles_list(
-                    page_num=1,
-                    start_page=page_start,
-                    fakeid=fakeid,
-                    token=self.token,
-                    headers=self.headers,
-                fetch_mode=self.fetch_mode
-                )
+                titles, links, update_times = [], [], []
+                # 单页请求带自动切号
+                while True:
+                    try:
+                        titles, links, update_times = get_articles_list(
+                            page_num=1,
+                            start_page=page_start,
+                            fakeid=fakeid,
+                            token=self.token,
+                            headers=self.headers,
+                            fetch_mode=self.fetch_mode
+                        )
+                        break
+                    except WeChatRateLimitError:
+                        logger.warning(f"爬取页 {page+1} 时触发频次限制，尝试无缝切号...")
+                        if not self._rotate_on_error("rate_limit", self.token):
+                            break
+                    except WeChatTokenExpiredError:
+                        logger.warning(f"爬取页 {page+1} 时凭证失效，尝试无缝切号...")
+                        if not self._rotate_on_error("expired", self.token):
+                            break
 
                 if not titles:
-                    break  # 没有更多文章
+                    break  # 没有更多文章或无可用账号
 
                 # 构建文章信息
                 for title, link, update_time in zip(titles, links, update_times):
@@ -165,8 +230,8 @@ class WeChatScraper:
                         'link': link,
                         'publish_timestamp': int(update_time),
                         'publish_time': format_time(update_time),
-                        'digest': '',  # 稍后可能会获取
-                        'content': ''  # 稍后可能会获取
+                        'digest': '',
+                        'content': ''
                     }
                     all_articles.append(article)
 

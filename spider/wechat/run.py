@@ -67,10 +67,9 @@ class WeChatSpiderRunner:
 
         try:
             with sync_playwright() as p:
-                # 启动浏览器（优化配置：强制允许图片加载、禁用资源拦截）
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=[
+                launch_kwargs = {
+                    'headless': True,
+                    'args': [
                         '--no-sandbox',  # 兼容 Linux 无沙箱环境
                         '--disable-blink-features=AutomationControlled',  # 规避自动化检测
                         '--disable-web-security',  # 兼容跨域 cookie/图片
@@ -80,8 +79,15 @@ class WeChatSpiderRunner:
                         '--disable-dev-shm-usage',  # 解决内存不足问题
                         '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
                     ],
-                    handle_sigint=False
-                )
+                    'handle_sigint': False
+                }
+                
+                from spider.wechat.config import PROXY_CONFIG
+                if PROXY_CONFIG.get('enabled') and (PROXY_CONFIG.get('http') or PROXY_CONFIG.get('https')):
+                    server_url = PROXY_CONFIG.get('http') or PROXY_CONFIG.get('https')
+                    launch_kwargs['proxy'] = {'server': server_url}
+
+                browser = p.chromium.launch(**launch_kwargs)
 
                 # 创建浏览器上下文
                 context = browser.new_context(

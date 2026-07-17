@@ -53,3 +53,17 @@ DATE_RANGE_CONFIG = {
     'max_range_days': 365,  # 最大日期范围（天）
     'default_days': 30  # 默认日期范围（天）
 }
+
+# 代理 IP 配置（可通过环境变量或代码覆盖）
+PROXY_CONFIG = {
+    'enabled': False,
+    'http': None,
+    'https': None
+}
+
+# 批量爬取不同公众号之间的休息间隔（秒）
+BATCH_INTER_ACCOUNT_DELAY = {
+    'min': 15,
+    'max': 35
+}
+

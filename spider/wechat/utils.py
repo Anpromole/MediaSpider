@@ -28,8 +28,25 @@ import bs4
 from markdownify import MarkdownConverter
 
 # 导入日志模块
-from spider.wechat.config import REQUEST_DELAY, DEFAULT_FETCH_MODE
+from spider.wechat.config import REQUEST_DELAY, DEFAULT_FETCH_MODE, PROXY_CONFIG
 from spider.log.utils import logger
+
+
+class WeChatRateLimitError(Exception):
+    """微信 API 频次限制异常 (ret 200013)"""
+    def __init__(self, token, msg="微信接口频次受限"):
+        self.token = token
+        self.msg = msg
+        super().__init__(f"{msg} (Token: {token})")
+
+
+class WeChatTokenExpiredError(Exception):
+    """微信 Cookie / Token 失效异常 (ret -1 或 200003)"""
+    def __init__(self, token, msg="微信登录凭证失效"):
+        self.token = token
+        self.msg = msg
+        super().__init__(f"{msg} (Token: {token})")
+
 
 
 class ImageBlockConverter(MarkdownConverter):
@@ -80,11 +97,23 @@ def get_fakid(headers, tok, query):
         'ajax': '1',
     }
     
-    # 发送请求
-    r = requests.get(url, headers=headers, params=data)
+    # 准备代理参数
+    proxies = None
+    if PROXY_CONFIG.get('enabled') and (PROXY_CONFIG.get('http') or PROXY_CONFIG.get('https')):
+        proxies = {
+            'http': PROXY_CONFIG.get('http'),
+            'https': PROXY_CONFIG.get('https')
+        }
     
-    # 解析json
+    # 发送请求
+    r = requests.get(url, headers=headers, params=data, proxies=proxies, timeout=15)
     dic = r.json()
+
+    ret_code = dic.get('base_resp', {}).get('ret', 0)
+    if ret_code == 200013:
+        raise WeChatRateLimitError(tok)
+    elif ret_code in (-1, 200003):
+        raise WeChatTokenExpiredError(tok)
     
     # 获取公众号名称、fakeid
     wpub_list = [
@@ -92,7 +121,7 @@ def get_fakid(headers, tok, query):
             'wpub_name': item['nickname'],
             'wpub_fakid': item['fakeid']
         }
-        for item in dic['list']
+        for item in dic.get('list', [])
     ]
     
     return wpub_list
@@ -122,6 +151,14 @@ def get_articles_list(page_num, start_page, fakeid, token, headers, fetch_mode="
     delay_config = REQUEST_DELAY.get(fetch_mode, REQUEST_DELAY["fast"])
     delay_range = (delay_config["min"], delay_config["max"])
 
+    # 准备代理参数
+    proxies = None
+    if PROXY_CONFIG.get('enabled') and (PROXY_CONFIG.get('http') or PROXY_CONFIG.get('https')):
+        proxies = {
+            'http': PROXY_CONFIG.get('http'),
+            'https': PROXY_CONFIG.get('https')
+        }
+
     with tqdm(total=page_num) as pbar:
         for page in range(start_page, start_page + page_num):
             # 构建请求参数
@@ -143,9 +180,14 @@ def get_articles_list(page_num, start_page, fakeid, token, headers, fetch_mode="
             logger.info(f"[{fetch_mode} 模式] 等待 {delay:.1f} 秒后发送请求...")
             time.sleep(delay)
 
-            r = requests.get(url, headers=headers, params=data)
-            # 解析 json
+            r = requests.get(url, headers=headers, params=data, proxies=proxies, timeout=30)
             dic = r.json()
+
+            ret_code = dic.get('base_resp', {}).get('ret', 0)
+            if ret_code == 200013:
+                raise WeChatRateLimitError(token)
+            elif ret_code in (-1, 200003):
+                raise WeChatTokenExpiredError(token)
 
             # 检查是否有文章列表
             if 'app_msg_list' not in dic:
@@ -164,7 +206,7 @@ def get_articles_list(page_num, start_page, fakeid, token, headers, fetch_mode="
 
 def get_articles_by_offset(fakeid, token, headers, begin_offset=0, count=5, fetch_mode='fast'):
     """
-    按偏移量获取公众号文章列表 (带频率限制保护)
+    按偏移量获取公众号文章列表 (带代理与异常抛出)
 
     Args:
         fakeid: 公众号的 fakeid
@@ -203,13 +245,21 @@ def get_articles_by_offset(fakeid, token, headers, begin_offset=0, count=5, fetc
     logger.info(f"[{fetch_mode}模式] 偏移量 {begin_offset},等待 {delay:.1f} 秒后发送请求...")
     time.sleep(delay)
 
+    # 准备代理参数
+    proxies = None
+    if PROXY_CONFIG.get('enabled') and (PROXY_CONFIG.get('http') or PROXY_CONFIG.get('https')):
+        proxies = {
+            'http': PROXY_CONFIG.get('http'),
+            'https': PROXY_CONFIG.get('https')
+        }
+
     # 指数退避重试机制
     max_retries = 3
     base_wait = 5  # 基础等待时间 (秒)
 
     for attempt in range(max_retries):
         try:
-            r = requests.get(url, headers=headers, params=data, timeout=30)
+            r = requests.get(url, headers=headers, params=data, proxies=proxies, timeout=30)
         except requests.RequestException as e:
             logger.warning(f"请求异常：{e}, 准备重试...")
             if attempt < max_retries - 1:
@@ -240,19 +290,20 @@ def get_articles_by_offset(fakeid, token, headers, begin_offset=0, count=5, fetc
                 continue
             return []
 
-        # 检查是否是频率限制 (ret 200013)
+        # 检查响应返回码
         ret_code = dic.get('base_resp', {}).get('ret', 0)
         if ret_code == 200013:
-            wait_time = base_wait * (2 ** attempt)  # 5s, 10s, 20s
-            logger.warning(f"触发频率限制 (ret 200013),等待 {wait_time} 秒后重试... (尝试 {attempt + 1}/{max_retries})")
+            wait_time = base_wait * (2 ** attempt)
+            logger.warning(f"触发频率限制 (ret 200013),尝试 {attempt + 1}/{max_retries}...")
             if attempt < max_retries - 1:
-                logger.info(f"等待 {wait_time} 秒...")
-                time.sleep(wait_time)
-                # 额外随机延迟,避免规律性请求
-                time.sleep(random.uniform(2, 5))
+                time.sleep(wait_time + random.uniform(2, 5))
                 continue
-            logger.error(f"重试 {max_retries} 次后仍触发频率限制,建议暂停爬取至少 30 分钟后再试")
-            return []
+            # 向上抛出频率限制异常，供账号池捕捉切号
+            raise WeChatRateLimitError(token)
+
+        if ret_code in (-1, 200003):
+            # 凭证失效异常
+            raise WeChatTokenExpiredError(token)
 
         # 其他业务错误
         if ret_code != 0:
