@@ -384,31 +384,13 @@ def get_articles_by_date_range(fakeid, token, headers, start_date, end_date, max
     max_offset = max_pages * 5
     oldest_date = offset_to_date(max_offset)
 
-    # 如果最老日期仍晚于开始日期,说明所有文章都在范围内,直接获取
+    target_max_offset = max_offset
+    start_offset = 0
+
     if oldest_date and oldest_date >= start_date:
-        logger.info(f"所有文章都在目标日期范围内,全量获取")
-        result = []
-        current_offset = 0
-        while current_offset < max_offset:
-            articles = get_articles_by_offset(fakeid, token, headers, begin_offset=current_offset, count=5, fetch_mode='date_range')
-            if not articles:
-                break
-
-            # 过滤在结束日期之前的文章
-            for article in articles:
-                article_date = datetime.fromtimestamp(article['update_time']).date()
-                if article_date <= end_date:
-                    result.append(article)
-
-            current_offset += 5
-            # 额外延迟(已在 get_articles_by_offset 中处理)
-            if progress_callback:
-                progress_callback(current_offset, max_offset)
-
-        return result
-
-    # 3. 最老日期早于开始日期,需要用二分法定位开始日期所在的页
-    if oldest_date and oldest_date < start_date:
+        logger.info("所有可测页面的文章都在目标日期范围内,全量顺序获取")
+    else:
+        # 3. 最老日期早于开始日期或超出现有文章总量,使用二分法定位开始日期所在的页
         logger.info(f"使用二分法定位开始日期 {start_date} 所在的页...")
         low, high = 0, max_offset
         binary_search_steps = 0
@@ -422,8 +404,8 @@ def get_articles_by_date_range(fakeid, token, headers, start_date, end_date, max
                 progress_callback(mid, max_offset)
 
             if mid_date is None:
-                # 该偏移量没有文章,说明超出范围
-                logger.info(f"二分查找步骤 {binary_search_steps}: offset={mid}, 无文章")
+                # 该偏移量超出公众号文章总量,缩小上限
+                logger.info(f"二分查找步骤 {binary_search_steps}: offset={mid}, 无文章 (超出总量)")
                 high = mid
                 continue
 
@@ -436,22 +418,28 @@ def get_articles_by_date_range(fakeid, token, headers, start_date, end_date, max
                 # 中间日期晚于或等于开始日期,可能还要更早
                 low = mid + 1
 
-        # 二分查找完成,low 是第一个日期 < start_date 的偏移量
-        # 所以从 low-5 开始获取(确保覆盖 start_date)
-        start_offset = max(0, (low // 5 - 1) * 5)
-        logger.info(f"二分查找完成,从偏移量 {start_offset} 开始获取文章")
+        # 二分查找完成, low 是第一个日期 < start_date 的偏移量
+        # 将实际抓取上限偏移量锁定为 low + 5，杜绝无意义的高偏移量死循环
+        target_max_offset = min(max_offset, low + 5)
+        logger.info(f"二分查找完成, 确认抓取上限偏移量锁定为 {target_max_offset}")
 
-    # 4. 从定位点开始获取,直到超过结束日期
+    # 4. 从定位点开始获取,直到超过结束日期或触及上限
     result = []
     current_offset = start_offset
     total_checked = 0
+    consecutive_empty = 0
 
-    while current_offset < max_offset:
+    while current_offset < target_max_offset:
         articles = get_articles_by_offset(fakeid, token, headers, begin_offset=current_offset, count=5, fetch_mode='date_range')
         if not articles:
-            logger.info(f"偏移量 {current_offset} 无更多文章,停止爬取")
-            break
+            consecutive_empty += 1
+            if consecutive_empty >= 2:
+                logger.info(f"偏移量 {current_offset} 连续无文章,停止爬取")
+                break
+            current_offset += 5
+            continue
 
+        consecutive_empty = 0
         total_checked += len(articles)
 
         for article in articles:
@@ -464,19 +452,15 @@ def get_articles_by_date_range(fakeid, token, headers, start_date, end_date, max
             # 如果在结束日期范围内,加入结果
             if article_date <= end_date:
                 result.append(article)
-            else:
-                # 晚于结束日期,继续往下找
-                pass
 
-        # 如果该页最早文章已晚于结束日期,继续；如果已早于开始日期,停止
+        # 如果该页最早文章已早于开始日期,立即安全停止
         if articles and datetime.fromtimestamp(articles[-1]['update_time']).date() < start_date:
-            logger.info(f"到达开始日期之前,停止爬取")
+            logger.info(f"已触及开始日期 ({start_date}) 之前,安全停止爬取")
             break
 
         current_offset += 5
-        # 额外延迟(已在 get_articles_by_offset 中处理)
         if progress_callback:
-            progress_callback(current_offset, max_offset)
+            progress_callback(current_offset, target_max_offset)
 
     logger.info(f"共获取 {len(result)} 篇符合条件的文章")
     return result

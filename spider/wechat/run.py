@@ -184,6 +184,9 @@ class WeChatSpiderRunner:
             if os.path.exists(pdf_path):
                 os.remove(pdf_path)
             return False
+        finally:
+            import gc
+            gc.collect()
 
     def login(self):
         """登录微信公众平台并获取 token 和 cookie"""
