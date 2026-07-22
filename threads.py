@@ -317,5 +317,3 @@ class AutoTaskWorker(QThread):
 
         except Exception as e:
             self.finish_signal.emit(False, f"执行出错：{str(e)}")
-
-            self.finish_signal.emit(False, f"执行出错：{str(e)}")

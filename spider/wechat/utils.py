@@ -374,11 +374,23 @@ def get_articles_by_date_range(fakeid, token, headers, start_date, end_date, max
 
     # 最新文章的日期(列表第一项)
     latest_date = datetime.fromtimestamp(latest_articles[0]['update_time']).date()
+    # 最新一页最老文章的日期(列表最后一项)
+    latest_page_oldest_date = datetime.fromtimestamp(latest_articles[-1]['update_time']).date()
 
     # 如果最新文章日期早于结束日期,说明没有符合条件的文章
     if latest_date < end_date:
         logger.info(f"最新文章日期 ({latest_date}) 早于目标结束日期 ({end_date}),无符合条件的文章")
         return []
+
+    # 关键优化：如果最新一页的最老文章日期已 <= start_date，说明目标日期范围已全包含在最新一页中
+    if latest_page_oldest_date <= start_date:
+        logger.info(f"目标时间范围 ({start_date} ~ {end_date}) 已完全包含在最新一页 (offset=0) 中，直接获取，无需二分查找")
+        result = []
+        for article in latest_articles:
+            article_date = datetime.fromtimestamp(article['update_time']).date()
+            if start_date <= article_date <= end_date:
+                result.append(article)
+        return result
 
     # 2. 检查最后一页(max_pages*5)的日期,判断是否需要二分查找
     max_offset = max_pages * 5
