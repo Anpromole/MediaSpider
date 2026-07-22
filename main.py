@@ -692,9 +692,17 @@ class WeChatSpiderUI(QMainWindow):
         config.wechat_accounts = [a.strip() for a in accounts_text.split("\n") if a.strip()]
 
         config.wechat_keywords = [k.strip() for k in self.wechat_keyword_edit.toPlainText().split("\n") if k.strip()]
-        config.start_date = self.auto_start_date.date().toString("yyyy-MM-dd")
-        config.end_date = self.auto_end_date.date().toString("yyyy-MM-dd")
-        config.wechat_fetch_mode = self.auto_fetch_mode.currentData()
+        # 如果处于持续监听状态，起始日期设为监听启动日，结束日期设为当前最新日期
+        if getattr(self, 'is_listening_active', False) and getattr(self, 'listening_start_time', None):
+            config.start_date = self.listening_start_time.strftime("%Y-%m-%d")
+            config.end_date = QDate.currentDate().toString("yyyy-MM-dd")
+            # 持续监听轮询时强制使用增量快速模式，只检测最新文章
+            config.wechat_fetch_mode = 'fast'
+        else:
+            config.start_date = self.auto_start_date.date().toString("yyyy-MM-dd")
+            config.end_date = self.auto_end_date.date().toString("yyyy-MM-dd")
+            config.wechat_fetch_mode = self.auto_fetch_mode.currentData()
+
         config.time_span = self.time_span_combo.currentData()
         config.pdf_base_dir = self.pdf_dir
         config.generate_pdf = self.auto_pdf_check.isChecked()
@@ -832,12 +840,12 @@ class WeChatSpiderUI(QMainWindow):
         else:
             self.add_log_msg("系统", f"⚠️ {msg}")
 
-        # 判断是否处于持续监听模式且勾选了定时轮询
-        if getattr(self, 'is_listening_active', False) and self.timer_check.isChecked():
+        # 如果处于持续监听模式，持续自动调度下一个轮询周期（直到手动点击停止）
+        if getattr(self, 'is_listening_active', False):
             freq = self.timer_freq_spin.value()
             unit = self.timer_unit_combo.currentText()
             interval_ms = freq * 60 * 1000 if unit == "分钟" else freq * 3600 * 1000
-            self.add_log_msg("系统", f"⏳ 本轮监听完成。下一个轮询监听周期将在 {freq} {unit} 后自动启动...")
+            self.add_log_msg("系统", f"⏳ 本轮监听完成。下一个监听监控周期将在 {freq} {unit} 后自动启动...")
 
             if not hasattr(self, 'auto_timer') or not self.auto_timer:
                 self.auto_timer = QTimer(self)
