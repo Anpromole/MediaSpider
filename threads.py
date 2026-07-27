@@ -288,25 +288,41 @@ class AutoTaskWorker(QThread):
 
                     current_step += 1
 
-            # ==================== Dify 上传 ====================
+            # ==================== Dify 上传 (含严格去重过滤) ====================
             if self.config.dify_upload_enabled and all_pdf_files:
-                update_progress(f"开始上传 {len(all_pdf_files)} 个 PDF 到 Dify...")
+                from spider.wechat.history import HistoryManager
+                history_mgr = HistoryManager()
+                dataset_id = self.config.dify_dataset_id
 
-                uploaded = 0
+                # 去重筛选：剔除已成功上传至当前 dataset_id 的 PDF
+                pending_upload = []
                 for pdf_path in all_pdf_files:
-                    if self.stop_flag:
-                        break
                     if os.path.exists(pdf_path):
+                        if history_mgr.is_uploaded_to_dify(pdf_path, dataset_id):
+                            from spider.log.utils import logger
+                            logger.info(f"文件 [{os.path.basename(pdf_path)}] 之前已上传至 Dify 知识库 [{dataset_id}]，自动跳过重复上传。")
+                        else:
+                            pending_upload.append(pdf_path)
+
+                if not pending_upload:
+                    update_progress(f"Dify 检查完成：所选 {len(all_pdf_files)} 个 PDF 之前已全部上传过该知识库，无需重复上传。")
+                else:
+                    update_progress(f"开始上传 {len(pending_upload)}/{len(all_pdf_files)} 个新 PDF 到 Dify...")
+                    uploaded = 0
+                    for pdf_path in pending_upload:
+                        if self.stop_flag:
+                            break
                         pdf_name = os.path.basename(pdf_path)
                         if self.dify_client.upload_pdf_file(
-                            self.config.dify_dataset_id,
+                            dataset_id,
                             pdf_path,
                             pdf_name
                         ):
                             uploaded += 1
-                            update_progress(f"已上传：{uploaded}/{len(all_pdf_files)}")
+                            history_mgr.mark_dify_uploaded(pdf_path, dataset_id)
+                            update_progress(f"已上传：{uploaded}/{len(pending_upload)}")
 
-                update_progress(f"Dify 上传完成：{uploaded}/{len(all_pdf_files)}")
+                    update_progress(f"Dify 上传完成：新上传 {uploaded}/{len(pending_upload)} 个 PDF")
 
             # ==================== 完成 ====================
             if self.stop_flag:

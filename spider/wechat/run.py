@@ -27,8 +27,9 @@ from .login import WeChatSpiderLogin, quick_login
 from .scraper import WeChatScraper, BatchWeChatScraper
 from spider.db.factory import DatabaseFactory
 
-# 新增：PDF 生成相关依赖
+# 新增：PDF 生成与历史记录去重相关依赖
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from .history import HistoryManager
 
 
 class WeChatSpiderRunner:
@@ -37,8 +38,9 @@ class WeChatSpiderRunner:
     def __init__(self):
         """初始化爬虫运行器"""
         self.login_manager = WeChatSpiderLogin()
-        # 新增：运行控制标志位
+        # 新增：运行控制标志位与去重历史管理器
         self.keep_running = True
+        self.history_mgr = HistoryManager()
 
     def stop(self):
         """停止当前任务"""
@@ -319,20 +321,26 @@ class WeChatSpiderRunner:
                 if include_content:
                     article = scraper.get_article_content_by_url(article)
 
-                # 生成 PDF
+                # 生成 PDF（优先校验去重机制，复用已生成的 PDF）
                 if generate_pdf and article.get('link'):
-                    cleaned_title = self._clean_filename(article_title)
-                    pdf_path = os.path.join(pdf_dir, f"{cleaned_title}.pdf")
-                    counter = 1
-                    while os.path.exists(pdf_path):
-                        pdf_path = os.path.join(pdf_dir, f"{cleaned_title}_{counter}.pdf")
-                        counter += 1
-
-                    success = self._generate_article_pdf(article['link'], pdf_path, login_cookies)
-                    if success:
-                        article['pdf_path'] = pdf_path
+                    existing_pdf = self.history_mgr.is_pdf_exists(article)
+                    if existing_pdf:
+                        logger.info(f"文章 [{article_title}] 之前已生成 PDF，复用已有文件: {existing_pdf}")
+                        article['pdf_path'] = existing_pdf
                     else:
-                        article['pdf_path'] = ''
+                        cleaned_title = self._clean_filename(article_title)
+                        pdf_path = os.path.join(pdf_dir, f"{cleaned_title}.pdf")
+                        counter = 1
+                        while os.path.exists(pdf_path):
+                            pdf_path = os.path.join(pdf_dir, f"{cleaned_title}_{counter}.pdf")
+                            counter += 1
+
+                        success = self._generate_article_pdf(article['link'], pdf_path, login_cookies)
+                        if success:
+                            article['pdf_path'] = pdf_path
+                            self.history_mgr.mark_pdf_generated(article, pdf_path)
+                        else:
+                            article['pdf_path'] = ''
 
                 final_processed_articles.append(article)
 
